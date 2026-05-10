@@ -1,0 +1,41 @@
+# backend 配置示例。首次启动若未发现 config.yaml，会基于此文件自动创建。
+server:
+  listen: ":8080"
+  # 管理后台用户，生产环境请务必修改
+  admin:
+    username: "admin"
+    password: "admin123"
+  # 用于签发 admin session cookie，生产请改成随机字符串
+  session_secret: "change-me-to-a-random-string"
+
+storage:
+  # SQLite 数据库文件路径
+  db_path: "./data/video-site.db"
+  # 本地 teaser 兜底目录（网盘写入失败时使用）
+  local_preview_dir: "./data/previews"
+
+scanner:
+  # 扫描间隔（秒），0 表示只启动时扫一次
+  interval_seconds: 21600
+  # 单次扫描每家网盘目录递归层数上限
+  max_depth: 5
+  # 被扫描的扩展名
+  video_extensions: [".mp4", ".mkv", ".mov", ".webm", ".avi"]
+
+preview:
+  # 是否启用 ffmpeg 抽帧生成 teaser
+  enabled: true
+  # ffmpeg / ffprobe 可执行文件名或绝对路径
+  ffmpeg_path: "ffmpeg"
+  ffprobe_path: "ffprobe"
+  # teaser 总时长（秒）。多段模式下会均分给每段
+  duration_seconds: 9
+  # teaser 段数。1=从视频 25% 位置取单段；>=2 按时长自适应切段并拼接
+  segments: 3
+  # teaser 视频宽度
+  width: 480
+  # teaser 上传到网盘的目录（相对网盘根）。空值则写本地
+  remote_dir: "/previews"
+
+# 盘列表。上线后请通过管理后台添加，本文件可留空
+drives: []

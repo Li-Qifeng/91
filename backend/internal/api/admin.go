@@ -1,0 +1,284 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/video-site/backend/internal/auth"
+	"github.com/video-site/backend/internal/catalog"
+)
+
+type AdminServer struct {
+	Catalog *catalog.Catalog
+	Auth    *auth.Authenticator
+	// Hooks：外层注入实际执行者
+	OnDriveSaved    func(driveID string) error
+	OnDriveRemoved  func(driveID string)
+	OnScanRequested func(driveID string)
+	OnRegenPreview  func(videoID string)
+	// Preview 开关读写
+	GetPreviewEnabled func() bool
+	SetPreviewEnabled func(enabled bool) error
+}
+
+func (a *AdminServer) Register(r chi.Router) {
+	r.Route("/admin/api", func(r chi.Router) {
+		// 登录、登出不需要鉴权
+		r.Post("/login", a.handleLogin)
+		r.Post("/logout", a.handleLogout)
+		r.Get("/me", a.handleMe)
+
+		// 其余路由需鉴权
+		r.Group(func(r chi.Router) {
+			r.Use(a.Auth.Required)
+
+			// 网盘
+			r.Get("/drives", a.handleListDrives)
+			r.Post("/drives", a.handleUpsertDrive)
+			r.Delete("/drives/{id}", a.handleDeleteDrive)
+			r.Post("/drives/{id}/rescan", a.handleRescan)
+
+			// 视频
+			r.Get("/videos", a.handleAdminListVideos)
+			r.Put("/videos/{id}", a.handleUpdateVideo)
+			r.Post("/videos/{id}/regen-preview", a.handleRegenPreview)
+
+			// 运行时设置
+			r.Get("/settings", a.handleGetSettings)
+			r.Put("/settings", a.handlePutSettings)
+		})
+	})
+}
+
+type loginReq struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func (a *AdminServer) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var body loginReq
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	ok, err := a.Auth.Login(w, r, body.Username, body.Password)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *AdminServer) handleLogout(w http.ResponseWriter, r *http.Request) {
+	a.Auth.Logout(w, r)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *AdminServer) handleMe(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie("vs_admin")
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+		return
+	}
+	ok, _ := a.Catalog.ValidateSession(r.Context(), c.Value)
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": ok})
+}
+
+func (a *AdminServer) handleListDrives(w http.ResponseWriter, r *http.Request) {
+	drives, err := a.Catalog.ListDrives(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	// 出参不返回凭证明文，只告诉前端是否已配置
+	type out struct {
+		ID          string `json:"id"`
+		Kind        string `json:"kind"`
+		Name        string `json:"name"`
+		RootID      string `json:"rootId"`
+		ScanRootID  string `json:"scanRootId"`
+		Status      string `json:"status"`
+		LastError   string `json:"lastError,omitempty"`
+		HasCredential bool `json:"hasCredential"`
+	}
+	list := make([]out, 0, len(drives))
+	for _, d := range drives {
+		list = append(list, out{
+			ID: d.ID, Kind: d.Kind, Name: d.Name,
+			RootID: d.RootID, ScanRootID: d.ScanRootID,
+			Status: d.Status, LastError: d.LastError,
+			HasCredential: len(d.Credentials) > 0,
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+type upsertDriveReq struct {
+	ID          string            `json:"id"`
+	Kind        string            `json:"kind"`
+	Name        string            `json:"name"`
+	RootID      string            `json:"rootId"`
+	ScanRootID  string            `json:"scanRootId"`
+	Credentials map[string]string `json:"credentials"`
+}
+
+func (a *AdminServer) handleUpsertDrive(w http.ResponseWriter, r *http.Request) {
+	var body upsertDriveReq
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.ID == "" || body.Kind == "" {
+		http.Error(w, "id and kind are required", http.StatusBadRequest)
+		return
+	}
+	d := &catalog.Drive{
+		ID: body.ID, Kind: body.Kind, Name: body.Name,
+		RootID: body.RootID, ScanRootID: body.ScanRootID,
+		Credentials: body.Credentials,
+		Status:      "disconnected",
+	}
+	if err := a.Catalog.UpsertDrive(r.Context(), d); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if a.OnDriveSaved != nil {
+		if err := a.OnDriveSaved(body.ID); err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "warning": err.Error()})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *AdminServer) handleDeleteDrive(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := a.Catalog.DeleteDrive(r.Context(), id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if a.OnDriveRemoved != nil {
+		a.OnDriveRemoved(id)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *AdminServer) handleRescan(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if a.OnScanRequested != nil {
+		a.OnScanRequested(id)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+}
+
+func (a *AdminServer) handleAdminListVideos(w http.ResponseWriter, r *http.Request) {
+	items, total, err := a.Catalog.ListVideos(r.Context(), catalog.ListParams{
+		Page: 1, PageSize: 100,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+}
+
+type updateVideoReq struct {
+	Title       string   `json:"title"`
+	Author      string   `json:"author"`
+	Tags        []string `json:"tags"`
+	Category    string   `json:"category"`
+	Badges      []string `json:"badges"`
+	Description string   `json:"description"`
+	Thumbnail   string   `json:"thumbnail"`
+	Quality     string   `json:"quality"`
+	DurationSec int      `json:"durationSeconds"`
+}
+
+func (a *AdminServer) handleUpdateVideo(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var body updateVideoReq
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	v, err := a.Catalog.GetVideo(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	if body.Title != "" {
+		v.Title = body.Title
+	}
+	if body.Author != "" {
+		v.Author = body.Author
+	}
+	if body.Tags != nil {
+		v.Tags = body.Tags
+	}
+	if body.Category != "" {
+		v.Category = body.Category
+	}
+	if body.Badges != nil {
+		v.Badges = body.Badges
+	}
+	if body.Description != "" {
+		v.Description = body.Description
+	}
+	if body.Thumbnail != "" {
+		v.ThumbnailURL = body.Thumbnail
+	}
+	if body.Quality != "" {
+		v.Quality = body.Quality
+	}
+	if body.DurationSec > 0 {
+		v.DurationSeconds = body.DurationSec
+	}
+	if err := a.Catalog.UpsertVideo(r.Context(), v); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+func (a *AdminServer) handleRegenPreview(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if a.OnRegenPreview != nil {
+		a.OnRegenPreview(id)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+}
+
+// ---------- Settings ----------
+
+type settingsDTO struct {
+	PreviewEnabled bool `json:"previewEnabled"`
+}
+
+func (a *AdminServer) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	enabled := false
+	if a.GetPreviewEnabled != nil {
+		enabled = a.GetPreviewEnabled()
+	}
+	writeJSON(w, http.StatusOK, settingsDTO{PreviewEnabled: enabled})
+}
+
+func (a *AdminServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
+	var body settingsDTO
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if a.SetPreviewEnabled != nil {
+		if err := a.SetPreviewEnabled(body.PreviewEnabled); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, settingsDTO{PreviewEnabled: body.PreviewEnabled})
+}

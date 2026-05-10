@@ -1,0 +1,390 @@
+import { useEffect, useMemo, useState } from "react";
+import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import * as api from "./api";
+import { useToast } from "./ToastContext";
+import { Modal } from "./Modal";
+
+const kindLabel: Record<string, string> = {
+  quark: "夸克网盘",
+  p115: "115 网盘",
+  wopan: "联通沃盘",
+};
+
+type Kind = api.AdminDrive["kind"];
+
+type FormState = {
+  id: string;
+  kind: Kind;
+  name: string;
+  rootId: string;
+  scanRootId: string;
+  creds: Record<string, string>;
+};
+
+const emptyForm: FormState = {
+  id: "",
+  kind: "quark",
+  name: "",
+  rootId: "0",
+  scanRootId: "0",
+  creds: {},
+};
+
+export function DrivesPage() {
+  const [list, setList] = useState<api.AdminDrive[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form, setForm] = useState<FormState>(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const { show } = useToast();
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const data = await api.listDrives();
+      setList(data ?? []);
+    } catch (e) {
+      show(e instanceof Error ? e.message : "加载失败", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  function openCreate() {
+    setForm(emptyForm);
+    setModalOpen(true);
+  }
+
+  function openEdit(d: api.AdminDrive) {
+    setForm({
+      id: d.id,
+      kind: d.kind,
+      name: d.name,
+      rootId: d.rootId,
+      scanRootId: d.scanRootId || d.rootId,
+      creds: {},
+    });
+    setModalOpen(true);
+  }
+
+  async function handleSave() {
+    if (!form.id || !form.kind) {
+      show("请填 ID 和类型", "error");
+      return;
+    }
+    // 若编辑且没有提供凭证，提示一下但仍允许保存（不改凭证）
+    setSaving(true);
+    try {
+      const resp = await api.upsertDrive({
+        id: form.id,
+        kind: form.kind,
+        name: form.name || form.id,
+        rootId: form.rootId || "0",
+        scanRootId: form.scanRootId || form.rootId || "0",
+        credentials: form.creds,
+      });
+      if (resp.warning) {
+        show(`已保存，但 driver 初始化失败：${resp.warning}`, "error");
+      } else {
+        show("已保存", "success");
+      }
+      setModalOpen(false);
+      refresh();
+    } catch (e) {
+      show(e instanceof Error ? e.message : "保存失败", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(d: api.AdminDrive) {
+    if (!window.confirm(`确定删除 ${d.name || d.id}？\n这会移除盘配置，但不会删除其中的视频元数据。`)) return;
+    try {
+      await api.deleteDrive(d.id);
+      show("已删除", "success");
+      refresh();
+    } catch (e) {
+      show(e instanceof Error ? e.message : "删除失败", "error");
+    }
+  }
+
+  async function handleRescan(d: api.AdminDrive) {
+    try {
+      await api.rescan(d.id);
+      show("已触发扫描，可稍后刷新视频列表查看", "success");
+    } catch (e) {
+      show(e instanceof Error ? e.message : "触发失败", "error");
+    }
+  }
+
+  return (
+    <section>
+      <header className="admin-page__header">
+        <h1 className="admin-page__title">网盘管理</h1>
+        <button className="admin-btn is-primary" onClick={openCreate}>
+          <Plus size={14} /> 新建
+        </button>
+      </header>
+
+      {loading ? (
+        <div className="admin-empty">加载中...</div>
+      ) : list.length === 0 ? (
+        <div className="admin-card admin-empty">
+          还没有配置任何网盘。点击右上角「新建」，选择夸克 / 115 / 沃盘，填入凭证即可。
+        </div>
+      ) : (
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>名称</th>
+              <th>类型</th>
+              <th>ID</th>
+              <th>状态</th>
+              <th>扫描根</th>
+              <th className="is-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((d) => (
+              <tr key={d.id}>
+                <td>{d.name || <span style={{ color: "#aaa" }}>（未命名）</span>}</td>
+                <td>{kindLabel[d.kind] ?? d.kind}</td>
+                <td style={{ fontFamily: "ui-monospace", fontSize: 12 }}>{d.id}</td>
+                <td>
+                  <StatusTag status={d.status} error={d.lastError} hasCred={d.hasCredential} />
+                </td>
+                <td style={{ fontFamily: "ui-monospace", fontSize: 12 }}>
+                  {d.scanRootId || d.rootId}
+                </td>
+                <td className="is-actions">
+                  <button className="admin-btn" onClick={() => handleRescan(d)}>
+                    <RefreshCw size={13} /> 重扫
+                  </button>{" "}
+                  <button className="admin-btn" onClick={() => openEdit(d)}>
+                    编辑
+                  </button>{" "}
+                  <button className="admin-btn is-danger" onClick={() => handleDelete(d)}>
+                    <Trash2 size={13} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <Modal
+        open={modalOpen}
+        title={form.id && list.find((x) => x.id === form.id) ? "编辑网盘" : "新建网盘"}
+        onClose={() => setModalOpen(false)}
+        footer={
+          <>
+            <button className="admin-btn" onClick={() => setModalOpen(false)}>
+              取消
+            </button>
+            <button
+              className="admin-btn is-primary"
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? "保存中..." : "保存"}
+            </button>
+          </>
+        }
+      >
+        <DriveForm form={form} onChange={setForm} isEdit={!!list.find((x) => x.id === form.id)} />
+      </Modal>
+    </section>
+  );
+}
+
+function StatusTag({
+  status,
+  error,
+  hasCred,
+}: {
+  status: string;
+  error?: string;
+  hasCred: boolean;
+}) {
+  if (!hasCred) {
+    return <span className="admin-status is-pending">未配置凭证</span>;
+  }
+  if (status === "ok") return <span className="admin-status is-ok">已连接</span>;
+  if (status === "error")
+    return (
+      <span className="admin-status is-error" title={error}>
+        错误
+      </span>
+    );
+  return <span className="admin-status">{status || "未连接"}</span>;
+}
+
+function DriveForm({
+  form,
+  onChange,
+  isEdit,
+}: {
+  form: FormState;
+  onChange: (f: FormState) => void;
+  isEdit: boolean;
+}) {
+  const fields = useMemo(() => credentialFields(form.kind), [form.kind]);
+
+  function set<K extends keyof FormState>(k: K, v: FormState[K]) {
+    onChange({ ...form, [k]: v });
+  }
+  function setCred(k: string, v: string) {
+    onChange({ ...form, creds: { ...form.creds, [k]: v } });
+  }
+
+  return (
+    <div className="admin-form">
+      <div className="admin-form__row">
+        <label>ID（英文，唯一）</label>
+        <input
+          value={form.id}
+          onChange={(e) => set("id", e.target.value)}
+          placeholder="例如 my-quark"
+          disabled={isEdit}
+        />
+        {isEdit && <div className="admin-form__help">已创建的盘 ID 不能修改</div>}
+      </div>
+      <div className="admin-form__row">
+        <label>名称</label>
+        <input
+          value={form.name}
+          onChange={(e) => set("name", e.target.value)}
+          placeholder="给这个盘起个名字"
+        />
+      </div>
+      <div className="admin-form__row">
+        <label>类型</label>
+        <select
+          value={form.kind}
+          onChange={(e) => set("kind", e.target.value as Kind)}
+          disabled={isEdit}
+        >
+          <option value="quark">夸克网盘</option>
+          <option value="p115">115 网盘</option>
+          <option value="wopan">联通沃盘</option>
+        </select>
+      </div>
+      <div className="admin-form__row">
+        <label>根目录 ID</label>
+        <input
+          value={form.rootId}
+          onChange={(e) => set("rootId", e.target.value)}
+          placeholder="0"
+        />
+      </div>
+      <div className="admin-form__row">
+        <label>扫描起点目录 ID</label>
+        <input
+          value={form.scanRootId}
+          onChange={(e) => set("scanRootId", e.target.value)}
+          placeholder="留空则使用根目录"
+        />
+        <div className="admin-form__help">
+          可以指定一个子目录作为视频库入口，避免扫描整个网盘
+        </div>
+      </div>
+
+      <hr style={{ border: 0, borderTop: "1px solid #eee", margin: "8px 0" }} />
+
+      <div className="admin-form__help" style={{ fontSize: 13, color: "#555" }}>
+        {credentialHelp(form.kind, isEdit)}
+      </div>
+
+      {fields.map((f) => (
+        <div key={f.key} className="admin-form__row">
+          <label>{f.label}{f.required && " *"}</label>
+          {f.multiline ? (
+            <textarea
+              value={form.creds[f.key] ?? ""}
+              onChange={(e) => setCred(f.key, e.target.value)}
+              placeholder={f.placeholder}
+            />
+          ) : (
+            <input
+              value={form.creds[f.key] ?? ""}
+              onChange={(e) => setCred(f.key, e.target.value)}
+              placeholder={f.placeholder}
+            />
+          )}
+          {f.help && <div className="admin-form__help">{f.help}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function credentialHelp(kind: Kind, isEdit: boolean): string {
+  const note = isEdit ? "如不修改凭证，留空即可，保存时会沿用旧值。" : "";
+  switch (kind) {
+    case "quark":
+      return `在 pan.quark.cn 登录后，F12 → Network → 任意请求 → Request Headers 里复制整段 Cookie 粘贴到下方。${note}`;
+    case "p115":
+      return `登录 115.com 后复制 Cookie，形如 "UID=...; CID=...; SEID=...; KID=..."。${note}`;
+    case "wopan":
+      return `需要 access_token 和 refresh_token。后续会加扫码/短信登录入口，第一版只能手工粘贴。${note}`;
+    default:
+      return "";
+  }
+}
+
+function credentialFields(kind: Kind): Array<{
+  key: string;
+  label: string;
+  placeholder: string;
+  multiline?: boolean;
+  required?: boolean;
+  help?: string;
+}> {
+  switch (kind) {
+    case "quark":
+      return [
+        {
+          key: "cookie",
+          label: "Cookie",
+          placeholder: "__pus=...; __puus=...; ...",
+          multiline: true,
+          required: true,
+        },
+      ];
+    case "p115":
+      return [
+        {
+          key: "cookie",
+          label: "Cookie",
+          placeholder: "UID=xxx; CID=xxx; SEID=xxx; KID=xxx",
+          multiline: true,
+          required: true,
+        },
+      ];
+    case "wopan":
+      return [
+        {
+          key: "access_token",
+          label: "access_token",
+          placeholder: "",
+          required: true,
+        },
+        {
+          key: "refresh_token",
+          label: "refresh_token",
+          placeholder: "",
+          required: true,
+        },
+        {
+          key: "family_id",
+          label: "family_id（家庭空间可选）",
+          placeholder: "留空走个人空间",
+        },
+      ];
+  }
+}
