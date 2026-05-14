@@ -333,9 +333,9 @@ func (a *App) attachDrive(ctx context.Context, d *catalog.Drive) error {
 		Width:           a.cfg.Preview.Width,
 		Segments:        a.cfg.Preview.Segments,
 		LocalDir:        a.cfg.Storage.LocalPreviewDir,
-		RemoteDir:       a.cfg.Preview.RemoteDir,
+		RemoteDir:       "",
 	})
-	worker := preview.NewWorker(gen, a.cat, drv, a.cfg.Preview.RemoteDir)
+	worker := preview.NewWorker(gen, a.cat, drv, "")
 	thumbWorker := preview.NewThumbWorker(gen, a.cat, drv)
 
 	workerCtx, cancel := context.WithCancel(ctx)

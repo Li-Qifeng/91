@@ -25,8 +25,8 @@ type Config struct {
 	DurationSeconds int // 兼容旧配置；当前 teaser 每段固定 3 秒
 	Width           int
 	Segments        int    // 兼容旧配置；当前 30 秒及以上视频固定使用 4 段
-	LocalDir        string // 本地兜底
-	RemoteDir       string // 远端目录路径（相对盘根）
+	LocalDir        string // 本地 teaser 和封面目录
+	RemoteDir       string // Deprecated: 保留配置兼容性；teaser 不再回写网盘
 }
 
 type Generator struct {
@@ -449,23 +449,21 @@ func copyFile(src, dst string) error {
 // --- Worker ---
 
 type Worker struct {
-	Gen       TeaserGenerator
-	Catalog   *catalog.Catalog
-	Drive     drives.Drive
-	RemoteDir string
-	ch        chan *catalog.Video
+	Gen     TeaserGenerator
+	Catalog *catalog.Catalog
+	Drive   drives.Drive
+	ch      chan *catalog.Video
 
 	RateLimitCooldown time.Duration
 	rateLimit         rateLimitState
 }
 
-func NewWorker(gen TeaserGenerator, cat *catalog.Catalog, drv drives.Drive, remoteDir string) *Worker {
+func NewWorker(gen TeaserGenerator, cat *catalog.Catalog, drv drives.Drive, _ string) *Worker {
 	return &Worker{
-		Gen:       gen,
-		Catalog:   cat,
-		Drive:     drv,
-		RemoteDir: remoteDir,
-		ch:        make(chan *catalog.Video, 4096),
+		Gen:     gen,
+		Catalog: cat,
+		Drive:   drv,
+		ch:      make(chan *catalog.Video, 4096),
 	}
 }
 
@@ -772,20 +770,8 @@ func (w *Worker) process(ctx context.Context, v *catalog.Video) {
 		return
 	}
 
-	previewFileID := ""
-	if w.RemoteDir != "" {
-		if fid, uerr := w.uploadToDrive(ctx, v.ID, local); uerr == nil {
-			previewFileID = fid
-		} else {
-			if w.pauseForRateLimit(uerr, "upload", v.Title) {
-				log.Printf("[preview] upload %s: %v (local only; drive cooling down)", v.Title, uerr)
-			} else {
-				log.Printf("[preview] upload %s: %v (local only)", v.Title, uerr)
-			}
-		}
-	}
 	removePreviousLocalTeaser(v.PreviewLocal, local)
-	w.Catalog.UpdatePreview(ctx, v.ID, previewFileID, local, "ready")
+	w.Catalog.UpdatePreview(ctx, v.ID, "", local, "ready")
 	log.Printf("[preview] ready %s (duration=%.1fs)", v.Title, duration)
 }
 
@@ -799,23 +785,6 @@ func removePreviousLocalTeaser(previous, current string) {
 	if err := os.Remove(previous); err != nil && !os.IsNotExist(err) {
 		log.Printf("[preview] remove old local teaser %s: %v", previous, err)
 	}
-}
-
-func (w *Worker) uploadToDrive(ctx context.Context, videoID, localPath string) (string, error) {
-	parentID, err := w.Drive.EnsureDir(ctx, w.RemoteDir)
-	if err != nil {
-		return "", err
-	}
-	f, err := os.Open(localPath)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	stat, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	return w.Drive.Upload(ctx, parentID, videoID+".mp4", f, stat.Size())
 }
 
 // --- utils ---

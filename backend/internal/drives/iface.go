@@ -29,12 +29,11 @@ type Drive interface {
 	// 代理层据此回源，透传 Range
 	StreamURL(ctx context.Context, fileID string) (*StreamLink, error)
 
-	// Upload 把本地流写入指定目录，返回新文件 fileID
-	// 用于 scanner 把 teaser 写回网盘
+	// Upload 把本地流写入指定目录，返回新文件 fileID。
+	// 当前 teaser 和封面只保存在本地，不再通过该方法写回网盘。
 	Upload(ctx context.Context, parentID, name string, r io.Reader, size int64) (string, error)
 
-	// EnsureDir 保证指定路径存在（相对根目录），返回最终目录 fileID
-	// 例如传 "/previews" 会保证根下有一个 previews 目录
+	// EnsureDir 保证指定路径存在（相对根目录），返回最终目录 fileID。
 	EnsureDir(ctx context.Context, pathFromRoot string) (string, error)
 
 	// RootID 返回根目录 fileID

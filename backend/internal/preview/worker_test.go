@@ -139,6 +139,37 @@ func TestPreviewWorkerRemovesPreviousLocalTeaserAfterNewTeaserIsReady(t *testing
 	}
 }
 
+func TestPreviewWorkerDoesNotUploadTeaserWhenRemoteDirIsConfigured(t *testing.T) {
+	ctx := context.Background()
+	cat, video := seedPreviewTestVideo(t, "preview-local-only-video")
+	localPath := filepath.Join(t.TempDir(), "local-only-teaser.mp4")
+	gen := &fakeTeaserGenerator{localPath: localPath}
+	drv := &previewFakeDrive{}
+	worker := NewWorker(gen, cat, drv, "/previews")
+
+	worker.process(ctx, video)
+
+	got, err := cat.GetVideo(ctx, video.ID)
+	if err != nil {
+		t.Fatalf("get video: %v", err)
+	}
+	if got.PreviewStatus != "ready" {
+		t.Fatalf("preview status = %q, want ready", got.PreviewStatus)
+	}
+	if got.PreviewLocal != localPath {
+		t.Fatalf("preview local = %q, want %q", got.PreviewLocal, localPath)
+	}
+	if got.PreviewFileID != "" {
+		t.Fatalf("preview file id = %q, want empty for local-only teaser", got.PreviewFileID)
+	}
+	if drv.ensureDirCalls != 0 {
+		t.Fatalf("ensure dir calls = %d, want 0", drv.ensureDirCalls)
+	}
+	if drv.uploadCalls != 0 {
+		t.Fatalf("upload calls = %d, want 0", drv.uploadCalls)
+	}
+}
+
 func TestPreviewWorkerRateLimitLeavesCurrentPendingAndSkipsNextVideo(t *testing.T) {
 	ctx := context.Background()
 	cat, first := seedPreviewTestVideo(t, "preview-rate-limit-1")
@@ -259,8 +290,10 @@ func (g *fakeTeaserGenerator) MoveToLocal(_ string, videoID string) (string, err
 }
 
 type previewFakeDrive struct {
-	streamFileID string
-	streamErr    error
+	streamFileID   string
+	streamErr      error
+	ensureDirCalls int
+	uploadCalls    int
 }
 
 func (d *previewFakeDrive) Kind() string { return "fake" }
@@ -282,9 +315,11 @@ func (d *previewFakeDrive) StreamURL(_ context.Context, fileID string) (*drives.
 	return &drives.StreamLink{URL: "https://video.example/clip.mp4"}, nil
 }
 func (d *previewFakeDrive) Upload(context.Context, string, string, io.Reader, int64) (string, error) {
+	d.uploadCalls++
 	return "", drives.ErrNotSupported
 }
 func (d *previewFakeDrive) EnsureDir(context.Context, string) (string, error) {
+	d.ensureDirCalls++
 	return "", drives.ErrNotSupported
 }
 func (d *previewFakeDrive) RootID() string { return "root" }

@@ -1331,7 +1331,7 @@ VideoProject/
 - **SDK**：
   - 夸克：移植 OpenList `drivers/quark_uc` 的 HTTP 逻辑（纯 Cookie + resty）。
   - 115：`github.com/SheltonZhu/115driver`，通过 `replace` 指令指向 `../115driver-1.3.2`。
-  - PikPak：移植 OpenList `drivers/pikpak` 的 HTTP 逻辑（用户名密码 / refresh_token + captcha_token + resty）；第一版支持扫描和播放，teaser 上传走本地兜底。
+  - PikPak：移植 OpenList `drivers/pikpak` 的 HTTP 逻辑（用户名密码 / refresh_token + captcha_token + resty）；支持扫描和播放，teaser/封面生成产物只写本地。
   - 沃盘：`github.com/OpenListTeam/wopan-sdk-go`，`replace` 指向 `../wopan-sdk-go-0.2.0`。
 - **视频处理**：ffmpeg / ffprobe，作为外部子进程调用。
 - **部署**：本地 Windows 开发，最终部署到 Linux 服务器（二进制 + systemd + nginx 反代）。
@@ -1416,8 +1416,8 @@ scanner 每次发现新视频（catalog 里没有的 fileID）时：
    - `scale=480:-2`：目标宽 480，缩减体积到 300KB-1.5MB
    - `-movflags +faststart`：让 moov atom 在文件头部，支持边下边播
 3. ffmpeg 需要带上 Drive 提供的 UA/Referer/Cookie（用 `-headers` 参数传递）
-4. teaser 上传到网盘 `/previews/<fileID>.mp4`
-5. catalog 记录 `preview_file_id`，详情页/卡片返回 `previewSrc` 指向 `/p/<drive>/<previewFileID>`
+4. teaser 写入本地 `data/previews/<videoID>.mp4`
+5. catalog 记录 `preview_local`，详情页/卡片返回 `previewSrc` 指向 `/p/preview/<videoID>`；旧版 `preview_file_id` 字段保留但不再用于读取
 
 失败重试 3 次，间隔指数退避。失败的记录标记 `preview_status = failed`，不再自动重试，需要后台手动重扫。
 
@@ -1523,7 +1523,7 @@ Linux 服务器：
 
 - **三家协议变动风险**：协议是逆向出来的，网盘方改就得跟着改。SDK 社区更新到了就 `go get` 新版本。
 - **网盘风控**：扫描频率太高、直链请求太密集可能被封。scanner 默认 QPS 限制 + 单次扫描目录数量上限。
-- **teaser 回写可能需要网盘有"写权限"**：某些只读分享场景下需要把 teaser 存到本地文件系统而非回网盘。第一版先用"回网盘"，如遇权限问题降级到本地 `data/previews/`。
+- **teaser/封面本地存储**：生成产物只写入本地 `data/previews/`，不再依赖网盘写权限；部署时需要把该目录纳入持久化和备份策略。
 
 ### 15.12 Teaser 生成策略（已落地）
 

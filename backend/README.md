@@ -145,11 +145,11 @@ ffmpeg -ss <起点> -headers "UA/Cookie/Referer" -i <直链> \
        -movflags +faststart -y <local>.mp4
 ```
 
-当前策略是每段固定 3 秒；30 秒以下最多 3 段，30 秒及以上固定 4 段；长视频在 20% 到 80% 区间均匀取段。优先把 teaser 上传回网盘的 `previews/` 目录；失败时保留本地 `data/previews/<videoID>.mp4` 作为兜底。
+当前策略是每段固定 3 秒；30 秒以下最多 3 段，30 秒及以上固定 4 段；长视频在 20% 到 80% 区间均匀取段。生成的 teaser 和封面都只保存在本地 `data/previews/`，不会回写到网盘；旧数据中的 `preview_file_id` 会被忽略。
 
 服务启动或网盘重新挂载时，如果 Teaser 开关已开启，后端会把历史 `pending` 任务重新入队，避免重启后长期停在“待生成”。OneDrive 直链生成 teaser 时可能触发 Microsoft 429 限流；后端会识别这类错误并让当前网盘进入冷却期，保留任务为 `pending`，避免连续请求触发更严重限流。
 
-前端卡片的 `previewSrc` 统一指向 `/p/preview/<videoID>`，后端自动选择网盘代理或本地文件。
+前端卡片的 `previewSrc` 统一指向 `/p/preview/<videoID>`，后端只从本地 `preview_local` 文件读取。
 
 ## 验证
 

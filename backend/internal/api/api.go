@@ -543,10 +543,6 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "preview not ready", http.StatusNotFound)
 		return
 	}
-	if v.PreviewFileID != "" {
-		s.Proxy.ServeStream(w, r, v.DriveID, v.PreviewFileID)
-		return
-	}
 	if v.PreviewLocal != "" {
 		if !strings.HasPrefix(filepath.Clean(v.PreviewLocal), filepath.Clean(s.LocalDir)) {
 			http.Error(w, "invalid local path", http.StatusForbidden)

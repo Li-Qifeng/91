@@ -12,7 +12,7 @@ server:
 storage:
   # SQLite 数据库文件路径
   db_path: "./data/video-site.db"
-  # 本地 teaser 兜底目录（网盘写入失败时使用）
+  # 本地 teaser 和封面目录
   local_preview_dir: "./data/previews"
 
 scanner:
@@ -35,8 +35,8 @@ preview:
   segments: 3
   # teaser 视频宽度
   width: 480
-  # teaser 上传到网盘的目录（相对网盘根）。空值则写本地
-  remote_dir: "/previews"
+  # 已废弃：teaser 和封面始终只写本地，不再回写网盘
+  remote_dir: ""
 
 # 盘列表。上线后请通过管理后台添加，本文件可留空。
 # kind 支持 quark / p115 / pikpak / wopan / onedrive。
