@@ -64,6 +64,25 @@ func TestVideoSourceUsesLocalUploadRoute(t *testing.T) {
 	}
 }
 
+func TestPreviewURLIncludesUpdatedAtVersion(t *testing.T) {
+	got := previewURL(&catalog.Video{
+		ID:        "video-1",
+		UpdatedAt: time.UnixMilli(1778863000123),
+	})
+
+	if got != "/p/preview/video-1?v=1778863000123" {
+		t.Fatalf("preview URL = %q, want versioned URL", got)
+	}
+}
+
+func TestPreviewURLFallsBackWithoutUpdatedAt(t *testing.T) {
+	got := previewURL(&catalog.Video{ID: "video-1"})
+
+	if got != "/p/preview/video-1" {
+		t.Fatalf("preview URL = %q, want unversioned URL", got)
+	}
+}
+
 func TestHandleUploadVideoSavesFileVideoTagsAndQueuesPreview(t *testing.T) {
 	ctx := context.Background()
 	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
@@ -277,6 +296,9 @@ func TestHandlePreviewIgnoresRemotePreviewFileIDAndServesLocalFile(t *testing.T)
 	}
 	if rr.Body.String() != "local teaser" {
 		t.Fatalf("body = %q, want local teaser bytes", rr.Body.String())
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store", got)
 	}
 }
 

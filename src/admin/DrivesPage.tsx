@@ -161,7 +161,7 @@ export function DrivesPage() {
           还没有配置任何网盘。点击右上角「新建」，选择夸克 / 115 / PikPak / 沃盘 / OneDrive，填入凭证即可。
         </div>
       ) : (
-        <table className="admin-table">
+        <table className="admin-table admin-drives-table">
           <thead>
             <tr>
               <th>名称</th>
@@ -177,22 +177,22 @@ export function DrivesPage() {
           <tbody>
             {list.map((d) => (
               <tr key={d.id}>
-                <td>{d.name || <span style={{ color: "#aaa" }}>（未命名）</span>}</td>
-                <td>{kindLabel[d.kind] ?? d.kind}</td>
-                <td style={{ fontFamily: "ui-monospace", fontSize: 12 }}>{d.id}</td>
-                <td>
+                <td data-label="名称">{d.name || <span style={{ color: "#aaa" }}>（未命名）</span>}</td>
+                <td data-label="类型">{kindLabel[d.kind] ?? d.kind}</td>
+                <td data-label="ID" style={{ fontFamily: "ui-monospace", fontSize: 12 }}>{d.id}</td>
+                <td data-label="状态">
                   <StatusTag status={d.status} error={d.lastError} hasCred={d.hasCredential} />
                 </td>
-                <td style={{ fontFamily: "ui-monospace", fontSize: 12 }}>
+                <td data-label="扫描根" style={{ fontFamily: "ui-monospace", fontSize: 12 }}>
                   {d.scanRootId || d.rootId}
                 </td>
-                <td>
+                <td data-label="本地占用">
                   <StorageCell usage={storage?.drives[d.id]} />
                 </td>
-                <td>
+                <td data-label="Teaser">
                   <TeaserCounts drive={d} />
                 </td>
-                <td className="is-actions">
+                <td className="is-actions" data-label="操作">
                   <button className="admin-btn" onClick={() => handleRescan(d)}>
                     <RefreshCw size={13} /> 重扫
                   </button>{" "}

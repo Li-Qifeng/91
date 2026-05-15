@@ -2,6 +2,7 @@ package preview
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -92,6 +93,9 @@ func buildTeaserPlan(cfg Config, duration float64) teaserPlan {
 	}
 
 	eachSec := 3.0
+	if duration > 0 && duration < eachSec {
+		eachSec = duration
+	}
 
 	return teaserPlan{
 		starts:  pickSegmentStarts(duration, segs, eachSec),
@@ -102,7 +106,7 @@ func buildTeaserPlan(cfg Config, duration float64) teaserPlan {
 // pickSegmentStarts 根据视频总时长选出 N 段起点秒数（按时间升序）
 //
 // 规则：
-//   - duration < 30s → 最多 3 段；放不下完整 3 秒片段时丢弃对应片段
+//   - duration < 30s → 最多 3 段；不足 3 秒时用完整短视频作为单段
 //   - 30s ≤ duration < 10min → 4 段：前段跳过片头、末段避开片尾
 //   - duration ≥ 10min → 固定 4 段，按 20% ~ 80% 等距分布
 func pickSegmentStarts(duration float64, n int, eachSec float64) []float64 {
@@ -412,6 +416,10 @@ func (g *Generator) generate(ctx context.Context, duration float64, linkForInput
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("ffmpeg produced empty file, stderr: %s", string(out))
 	}
+	if err := g.validateGeneratedTeaser(ctx2, tmpPath); err != nil {
+		os.Remove(tmpPath)
+		return "", err
+	}
 	return tmpPath, nil
 }
 
@@ -499,6 +507,10 @@ func (g *Generator) generateSequential(ctx context.Context, duration float64, li
 		_ = os.Remove(tmpPath)
 		return "", fmt.Errorf("ffmpeg concat produced empty file, stderr: %s", string(out))
 	}
+	if err := g.validateGeneratedTeaser(ctx2, tmpPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
 
 	for _, p := range segmentPaths {
 		_ = os.Remove(p)
@@ -558,7 +570,79 @@ func (g *Generator) generateSingleSegment(ctx context.Context, index int, start,
 		_ = os.Remove(segPath)
 		return "", fmt.Errorf("ffmpeg segment produced empty file, stderr: %s", string(out))
 	}
+	if err := g.validateGeneratedTeaser(ctx, segPath); err != nil {
+		_ = os.Remove(segPath)
+		return "", err
+	}
 	return segPath, nil
+}
+
+type localMediaProbe struct {
+	Streams []struct {
+		CodecType string `json:"codec_type"`
+		Duration  string `json:"duration"`
+	} `json:"streams"`
+	Format struct {
+		Duration string `json:"duration"`
+	} `json:"format"`
+}
+
+func (g *Generator) validateGeneratedTeaser(ctx context.Context, path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if info.Size() == 0 {
+		return errors.New("generated teaser is empty")
+	}
+
+	ctx2, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	args := []string{
+		"-v", "error",
+		"-show_entries", "stream=codec_type,duration:format=duration",
+		"-of", "json",
+		path,
+	}
+	out, err := exec.CommandContext(ctx2, g.cfg.FFprobePath, args...).CombinedOutput()
+	if err != nil {
+		return ffmpegCommandError("ffprobe teaser", err, out)
+	}
+
+	var probe localMediaProbe
+	if err := json.Unmarshal(out, &probe); err != nil {
+		return fmt.Errorf("ffprobe teaser output: %w", err)
+	}
+
+	duration := parseProbeDuration(probe.Format.Duration)
+	hasVideo := false
+	for _, stream := range probe.Streams {
+		if stream.CodecType == "video" {
+			hasVideo = true
+		}
+		if d := parseProbeDuration(stream.Duration); d > duration {
+			duration = d
+		}
+	}
+	if !hasVideo {
+		return errors.New("generated teaser has no video stream")
+	}
+	if duration <= 0.01 {
+		return fmt.Errorf("generated teaser has invalid duration %.3fs", duration)
+	}
+	return nil
+}
+
+func parseProbeDuration(raw string) float64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "N/A" {
+		return 0
+	}
+	d, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 func escapeConcatPath(path string) string {

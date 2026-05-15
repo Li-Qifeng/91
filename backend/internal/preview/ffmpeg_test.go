@@ -81,13 +81,16 @@ func TestShortVideoPreviewPlanDropsSegmentsThatDoNotFit(t *testing.T) {
 	}
 }
 
-func TestShortVideoPreviewPlanReturnsNoSegmentsWhenOneSegmentCannotFit(t *testing.T) {
+func TestTinyVideoPreviewPlanUsesWholeVideoAsSingleSegment(t *testing.T) {
 	plan := buildTeaserPlan(Config{DurationSeconds: 15, Segments: 3}, 2.5)
-	if len(plan.starts) != 0 {
-		t.Fatalf("segments = %d, want 0", len(plan.starts))
+	if len(plan.starts) != 1 {
+		t.Fatalf("segments = %d, want 1", len(plan.starts))
 	}
-	if plan.eachSec != 3 {
-		t.Fatalf("eachSec = %.2f, want 3", plan.eachSec)
+	if plan.eachSec != 2.5 {
+		t.Fatalf("eachSec = %.2f, want 2.5", plan.eachSec)
+	}
+	if plan.starts[0] != 0 {
+		t.Fatalf("start[0] = %.2f, want 0", plan.starts[0])
 	}
 }
 

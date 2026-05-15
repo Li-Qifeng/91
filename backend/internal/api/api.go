@@ -548,6 +548,9 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid local path", http.StatusForbidden)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		s.Proxy.ServeLocal(w, r, v.PreviewLocal)
 		return
 	}
@@ -588,7 +591,7 @@ func mapVideo(v *catalog.Video) VideoDTO {
 		Href:            "/video/" + v.ID,
 		Title:           v.Title,
 		Thumbnail:       thumbnailURL(v),
-		PreviewSrc:      "/p/preview/" + v.ID,
+		PreviewSrc:      previewURL(v),
 		PreviewDuration: 12,
 		PreviewStrategy: "teaser-file",
 		Duration:        formatDuration(v.DurationSeconds),
@@ -604,6 +607,14 @@ func mapVideo(v *catalog.Video) VideoDTO {
 		Tags:            tags,
 		Category:        v.Category,
 	}
+}
+
+func previewURL(v *catalog.Video) string {
+	base := "/p/preview/" + v.ID
+	if v.UpdatedAt.IsZero() {
+		return base
+	}
+	return base + "?v=" + strconv.FormatInt(v.UpdatedAt.UnixMilli(), 10)
 }
 
 func thumbnailURL(v *catalog.Video) string {

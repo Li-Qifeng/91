@@ -347,6 +347,76 @@
   white-space: nowrap;
 }
 
+@media (max-width: 1200px) {
+  .admin-table.admin-drives-table {
+    display: block;
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  .admin-table.admin-drives-table thead {
+    display: none;
+  }
+
+  .admin-table.admin-drives-table tbody {
+    display: grid;
+    gap: 10px;
+  }
+
+  .admin-table.admin-drives-table tr {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px 14px;
+    padding: 12px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  .admin-table.admin-drives-table tr:last-child {
+    border-bottom: 0;
+  }
+
+  .admin-table.admin-drives-table td {
+    display: grid;
+    align-content: start;
+    gap: 4px;
+    min-width: 0;
+    padding: 0;
+    border-bottom: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-table.admin-drives-table td::before {
+    content: attr(data-label);
+    color: var(--color-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .admin-table.admin-drives-table td.is-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-start;
+    min-width: 0;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .admin-table.admin-drives-table td.is-actions::before {
+    flex-basis: 100%;
+  }
+
+  .admin-table.admin-drives-table .admin-status,
+  .admin-table.admin-drives-table .admin-storage-cell,
+  .admin-table.admin-drives-table .admin-teaser-counts {
+    justify-self: start;
+  }
+}
+
 .admin-status {
   display: inline-flex;
   align-items: center;
