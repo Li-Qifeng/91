@@ -277,8 +277,14 @@ func (d *Driver) requestOnce(ctx context.Context, url, method string, configure 
 				}
 				return d.requestOnce(ctx, url, method, configure, out, false)
 			}
-		case 9:
+		case 9, 4002:
 			if retry {
+				// 4002 = captcha_token expired；先清掉缓存让 refresh 走空 token 路径，
+				// 否则 refresh 仍会带着同一个过期 token 再次拿到 4002。
+				// 9 = 通用 captcha_invalid，刷新后通常能恢复。
+				if e.ErrorCode == 4002 {
+					d.captchaToken = ""
+				}
 				if err := d.refreshCaptchaTokenAtLogin(ctx, getAction(method, url), d.userID); err != nil {
 					return err
 				}

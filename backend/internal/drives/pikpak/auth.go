@@ -194,6 +194,17 @@ func (d *Driver) refreshCaptchaTokenInLogin(ctx context.Context, action, usernam
 }
 
 func (d *Driver) refreshCaptchaToken(ctx context.Context, action string, meta map[string]string) error {
+	return d.refreshCaptchaTokenOnce(ctx, action, meta, true)
+}
+
+// refreshCaptchaTokenOnce 调 /v1/shield/captcha/init 申请新 captcha token。
+//
+// 如果 retry=true 且服务端返回 4002（captcha_token expired，意味着 body 里
+// 携带的 d.captchaToken 已经过期），就清空缓存的 captcha_token 后再调一次；
+// 这次 body 里 captcha_token 为空，服务端会直接发一个新的。这覆盖
+// driver 重启后 Init() 用持久化的旧 captcha_token 调 captcha init 失败的
+// 场景。
+func (d *Driver) refreshCaptchaTokenOnce(ctx context.Context, action string, meta map[string]string, retry bool) error {
 	var e errResp
 	var out captchaTokenResponse
 	req := d.client.R().
@@ -219,6 +230,10 @@ func (d *Driver) refreshCaptchaToken(ctx context.Context, action string, meta ma
 		return err
 	}
 	if e.isError() {
+		if retry && e.ErrorCode == 4002 && d.captchaToken != "" {
+			d.captchaToken = ""
+			return d.refreshCaptchaTokenOnce(ctx, action, meta, false)
+		}
 		return &e
 	}
 	if res.IsError() {
