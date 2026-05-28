@@ -959,12 +959,13 @@
   .admin-sidebar {
     position: sticky;
     top: 0;
-    height: auto;
+    height: 48px;
+    min-height: 48px;
     flex-direction: row;
     align-items: center;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: var(--space-2) var(--space-3);
+    padding: 6px var(--space-2);
     background: var(--glass-nav);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -980,21 +981,31 @@
   .admin-sidebar__footer { display: none; }
 
   .admin-nav {
+    flex: 0 0 auto;
     flex-direction: row;
     flex-wrap: nowrap;
     width: max-content;
     margin: 0;
     padding: 0;
-    gap: var(--space-2);
+    gap: 6px;
+    align-items: center;
   }
 
   .admin-nav__link {
+    flex: 0 0 auto;
     height: 34px;
-    padding: 0 var(--space-3);
+    padding: 0 11px;
     border-radius: var(--radius-pill);
     white-space: nowrap;
     font-size: var(--font-sm);
+    line-height: 1;
     border: 1px solid transparent;
+  }
+
+  .admin-nav__link svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
   }
 
   .admin-nav__link:hover {
@@ -2184,6 +2195,4 @@
   font-weight: var(--weight-semibold);
   color: var(--text-default);
 }
-
-
 

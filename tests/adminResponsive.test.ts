@@ -78,3 +78,14 @@ test("admin modals and action footers adapt on mobile", () => {
   // 共享 body），所以走 ruleBodyByContains 而不是简单正则。
   assert.match(ruleBodyByContains(css, ".admin-form__row input"), /width\s*:\s*100%/);
 });
+
+test("mobile admin top navigation stays compact", () => {
+  const css = mobileCss();
+
+  assert.match(ruleBody(css, ".admin-sidebar"), /height\s*:\s*48px/);
+  assert.match(ruleBody(css, ".admin-sidebar"), /min-height\s*:\s*48px/);
+  assert.match(ruleBody(css, ".admin-nav"), /align-items\s*:\s*center/);
+  assert.match(ruleBody(css, ".admin-nav__link"), /height\s*:\s*34px/);
+  assert.match(ruleBody(css, ".admin-nav__link"), /line-height\s*:\s*1/);
+  assert.match(ruleBody(css, ".admin-nav__link"), /flex\s*:\s*0\s+0\s+auto/);
+});
