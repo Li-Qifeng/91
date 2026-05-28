@@ -395,7 +395,7 @@ export default function ShortsPage() {
   );
 
   useEffect(() => {
-    document.title = "短视频 · 视频聚合站";
+    document.title = "短视频 · 91";
   }, []);
 
   // 沉浸式：进入页面后锁住 body 滚动 + 把主题色改黑（Android Chrome 状态栏会变黑）

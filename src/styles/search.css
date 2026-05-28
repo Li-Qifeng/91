@@ -115,6 +115,12 @@
   scrollbar-width: none; /* Hide scrollbar for Firefox */
   -webkit-overflow-scrolling: touch;
   padding-bottom: 4px;
+  cursor: grab;
+  user-select: none;
+}
+
+.tag-cloud__grid.is-dragging {
+  cursor: grabbing;
 }
 
 .tag-cloud__grid::-webkit-scrollbar {

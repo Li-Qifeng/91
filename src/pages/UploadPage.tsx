@@ -18,7 +18,7 @@ export default function UploadPage() {
   const [uploaded, setUploaded] = useState<VideoItem | null>(null);
 
   useEffect(() => {
-    document.title = "上传视频 · 视频聚合站";
+    document.title = "上传视频 · 91";
   }, []);
 
   const fileMeta = useMemo(() => {

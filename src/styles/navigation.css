@@ -35,6 +35,14 @@
   transition: transform var(--transition-fast);
 }
 
+.main-nav__logo-text {
+  background: var(--accent-gradient-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: var(--weight-extrabold);
+}
+
 .main-nav__logo:hover {
   color: var(--text-strong);
   transform: scale(1.02);

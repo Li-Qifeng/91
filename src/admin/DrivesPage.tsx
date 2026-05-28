@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeft,
   ChevronDown,
   ChevronRight,
   Download,
   FolderTree,
+  HardDrive,
   PlayCircle,
   Plus,
   Power,
@@ -70,8 +72,7 @@ export function DrivesPage() {
   const [regenFailedThumbId, setRegenFailedThumbId] = useState("");
   // togglingTeaserId 在请求未返回前禁用按钮，避免连点导致两次切换互相覆盖。
   const [togglingTeaserId, setTogglingTeaserId] = useState("");
-  // skipDirsTarget 非空时打开"设置跳过目录"弹窗，里头维护当前选中的 drive 引用。
-  const [skipDirsTarget, setSkipDirsTarget] = useState<api.AdminDrive | null>(null);
+  const [selectedDriveId, setSelectedDriveId] = useState<string | null>(null);
   const { show } = useToast();
 
   // 当前系统中可作为 spider91 上传目标的 drive 列表（pikpak ∪ p115）。
@@ -115,6 +116,8 @@ export function DrivesPage() {
     }, 5000);
     return () => window.clearInterval(timer);
   }, []);
+
+
 
   function openCreate() {
     // 创建时把全局 setting 当前值带进表单，方便用户在新建第一个 spider91 drive 时
@@ -294,6 +297,260 @@ export function DrivesPage() {
     }
   }
 
+  const selectedDrive = useMemo(() => {
+    return selectedDriveId ? list.find((d) => d.id === selectedDriveId) : null;
+  }, [selectedDriveId, list]);
+
+  if (selectedDriveId && selectedDrive) {
+    const d = selectedDrive;
+    const driveStorage = storage?.drives[d.id];
+
+    return (
+      <section>
+        <header className="admin-drive-detail__header-bar">
+          <button
+            type="button"
+            className="admin-drive-detail__back-btn"
+            onClick={() => setSelectedDriveId(null)}
+            title="返回网盘列表"
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div className="admin-drive-detail__title-wrap">
+            <h1 className="admin-drive-detail__title">{d.name || d.id}</h1>
+            <span className="admin-mono-cell" style={{ fontSize: "14px", color: "var(--text-faint)" }}>
+              ({d.id})
+            </span>
+          </div>
+        </header>
+
+        <div className="admin-drive-detail-layout">
+          {/* 左栏：基本状态与控制 */}
+          <div>
+            <div className="admin-detail-card">
+              <header className="admin-detail-card__title">
+                <div className="admin-detail-card__title-left">
+                  <HardDrive size={16} />
+                  <span>基本信息与状态</span>
+                </div>
+                <StatusTag kind={d.kind} status={d.status} error={d.lastError} hasCred={d.hasCredential} />
+              </header>
+
+              <div className="admin-detail-grid">
+                <div className="admin-detail-row">
+                  <span className="admin-detail-label">网盘类型</span>
+                  <span className="admin-detail-value">{kindLabel[d.kind] ?? d.kind}</span>
+                </div>
+                <div className="admin-detail-row">
+                  <span className="admin-detail-label">网盘 ID</span>
+                  <span className="admin-detail-value admin-mono-cell">{d.id}</span>
+                </div>
+                {d.kind !== "spider91" && (
+                  <>
+                    <div className="admin-detail-row">
+                      <span className="admin-detail-label">根目录 ID</span>
+                      <span className="admin-detail-value admin-mono-cell">{d.rootId}</span>
+                    </div>
+                    <div className="admin-detail-row">
+                      <span className="admin-detail-label">扫描起点 ID</span>
+                      <span className="admin-detail-value admin-mono-cell">{d.scanRootId || d.rootId}</span>
+                    </div>
+                  </>
+                )}
+                {d.kind === "spider91" && (
+                  <div className="admin-detail-row">
+                    <span className="admin-detail-label">上次抓取时间</span>
+                    <span className="admin-detail-value">
+                      {d.lastCrawlAt ? new Date(d.lastCrawlAt * 1000).toLocaleString() : "尚未抓取"}
+                    </span>
+                  </div>
+                )}
+                {d.lastError && (
+                  <div className="admin-detail-row" style={{ alignItems: "start" }}>
+                    <span className="admin-detail-label">最后一次错误</span>
+                    <span className="admin-detail-value" style={{ color: "var(--danger)" }}>
+                      {d.lastError}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="admin-detail-actions">
+                <button className="admin-btn is-primary" onClick={() => handleRescan(d)}>
+                  {d.kind === "spider91" ? (
+                    <>
+                      <Download size={13} /> 立即抓取
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={13} /> 立即重扫
+                    </>
+                  )}
+                </button>
+                <button className="admin-btn" onClick={() => openEdit(d)}>
+                  编辑配置凭证
+                </button>
+                <button className="admin-btn is-danger" onClick={() => {
+                  handleDelete(d);
+                  setSelectedDriveId(null);
+                }} style={{ marginLeft: "auto" }}>
+                  <Trash2 size={13} /> 删除网盘
+                </button>
+              </div>
+            </div>
+
+            {/* 如果不是爬虫网盘，内嵌显示跳过目录设置 */}
+            {d.kind !== "spider91" && (
+              <SkipDirsPanel
+                drive={d}
+                onSaved={(saved) => {
+                  setList((prev) =>
+                    prev.map((item) =>
+                      item.id === saved.id
+                        ? { ...item, skipDirIds: saved.skipDirIds }
+                        : item
+                    )
+                  );
+                  refreshDriveList();
+                }}
+              />
+            )}
+          </div>
+
+          {/* 右栏：Teaser / 封面 与 缓存占用 */}
+          <div>
+            <div className="admin-detail-card">
+              <header className="admin-detail-card__title">
+                <div className="admin-detail-card__title-left">
+                  <PlayCircle size={16} />
+                  <span>Teaser 预览与封面</span>
+                </div>
+                <div className="admin-detail-actions-inline">
+                  <button
+                    className={`admin-btn ${d.teaserEnabled ? "is-success" : ""}`}
+                    onClick={() => handleToggleTeaser(d)}
+                    disabled={togglingTeaserId === d.id}
+                    style={{ padding: "4px 10px", fontSize: "11px" }}
+                  >
+                    {d.teaserEnabled ? <Power size={11} /> : <PowerOff size={11} />}
+                    <span>{d.teaserEnabled ? "Teaser: 开" : "Teaser: 关"}</span>
+                  </button>
+                </div>
+              </header>
+
+              <div className="admin-detail-grid">
+                <div className="admin-detail-row">
+                  <span className="admin-detail-label">封面状态</span>
+                  <div className="admin-detail-value">
+                    <GenerationStatusLine label="封面" status={d.thumbnailGenerationStatus} />
+                  </div>
+                </div>
+                <div className="admin-detail-row">
+                  <span className="admin-detail-label">封面数量</span>
+                  <div className="admin-detail-value">
+                    <GenerationCounts
+                      ready={d.thumbnailReadyCount}
+                      pending={d.thumbnailPendingCount}
+                      failed={d.thumbnailFailedCount}
+                    />
+                  </div>
+                </div>
+                <div className="admin-detail-row">
+                  <span className="admin-detail-label">Teaser 状态</span>
+                  <div className="admin-detail-value">
+                    <GenerationStatusLine label="预览" status={d.previewGenerationStatus} />
+                  </div>
+                </div>
+                <div className="admin-detail-row">
+                  <span className="admin-detail-label">Teaser 数量</span>
+                  <div className="admin-detail-value">
+                    <GenerationCounts
+                      ready={d.teaserReadyCount}
+                      pending={d.teaserPendingCount}
+                      failed={d.teaserFailedCount}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="admin-detail-actions">
+                <button
+                  className="admin-btn"
+                  disabled={(d.teaserFailedCount ?? 0) <= 0 || regenFailedId === d.id}
+                  onClick={() => handleRegenFailed(d)}
+                >
+                  <RotateCcw size={13} />
+                  <span>重试失败 Teaser</span>
+                </button>
+                <button
+                  className="admin-btn"
+                  disabled={(d.thumbnailFailedCount ?? 0) <= 0 || regenFailedThumbId === d.id}
+                  onClick={() => handleRegenFailedThumbnails(d)}
+                >
+                  <RotateCcw size={13} />
+                  <span>重试失败封面</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="admin-detail-card">
+              <header className="admin-detail-card__title">
+                <div className="admin-detail-card__title-left">
+                  <FolderTree size={16} />
+                  <span>本地存储占用</span>
+                </div>
+              </header>
+
+              <div className="admin-detail-grid">
+                <div className="admin-detail-row">
+                  <span className="admin-detail-label">封面占用</span>
+                  <span className="admin-detail-value">{formatBytes(driveStorage?.thumbnailBytes ?? 0)}</span>
+                </div>
+                <div className="admin-detail-row">
+                  <span className="admin-detail-label">Teaser 占用</span>
+                  <span className="admin-detail-value">{formatBytes(driveStorage?.teaserBytes ?? 0)}</span>
+                </div>
+                <div className="admin-detail-row">
+                  <span className="admin-detail-label">本地总占用</span>
+                  <span className="admin-detail-value" style={{ fontWeight: "bold" }}>
+                    {formatBytes(driveStorage?.totalBytes ?? 0)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <Modal
+          open={modalOpen}
+          title="编辑网盘"
+          onClose={() => setModalOpen(false)}
+          footer={
+            <>
+              <button className="admin-btn" onClick={() => setModalOpen(false)}>
+                取消
+              </button>
+              <button
+                className="admin-btn is-primary"
+                onClick={handleSave}
+                disabled={saving}
+              >
+                {saving ? "保存中..." : "保存"}
+              </button>
+            </>
+          }
+        >
+          <DriveForm
+            form={form}
+            onChange={setForm}
+            isEdit={true}
+            uploadTargets={uploadTargets}
+          />
+        </Modal>
+      </section>
+    );
+  }
+
   return (
     <section>
       <header className="admin-page__header">
@@ -308,7 +565,7 @@ export function DrivesPage() {
             <PlayCircle size={14} /> 立即跑全流程
           </button>
           <button className="admin-btn is-primary" onClick={openCreate}>
-            <Plus size={14} /> 新建
+            <Plus size={14} /> 新建网盘
           </button>
         </div>
       </header>
@@ -322,137 +579,53 @@ export function DrivesPage() {
           还没有配置任何网盘。点击右上角「新建」，选择夸克 / 115 / PikPak / 沃盘 / OneDrive，填入凭证即可。
         </div>
       ) : (
-        <table className="admin-table admin-drives-table">
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>类型</th>
-              <th>ID</th>
-              <th>状态</th>
-              <th>生成状态</th>
-              <th>扫描根</th>
-              <th>本地占用</th>
-              <th>封面</th>
-              <th>Teaser</th>
-              <th className="is-actions">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.map((d) => (
-              <tr key={d.id}>
-                <td data-label="名称">{d.name || <span className="admin-text-faint">（未命名）</span>}</td>
-                <td data-label="类型">{kindLabel[d.kind] ?? d.kind}</td>
-                <td data-label="ID" className="admin-mono-cell">{d.id}</td>
-                <td data-label="状态">
-                  <StatusTag kind={d.kind} status={d.status} error={d.lastError} hasCred={d.hasCredential} />
-                </td>
-                <td data-label="生成状态">
-                  <GenerationStatusCell drive={d} />
-                </td>
-                <td data-label="扫描根" className="admin-mono-cell">
-                  {d.kind === "spider91" ? (
-                    <span className="admin-text-faint">
-                      {d.lastCrawlAt
-                        ? `上次抓取 ${formatRelativeTime(d.lastCrawlAt)}`
-                        : "尚未抓取"}
+        <div className="admin-drives-grid">
+          {list.map((d) => (
+            <div
+              key={d.id}
+              className="admin-drive-card"
+              onClick={() => setSelectedDriveId(d.id)}
+            >
+              <div className="admin-drive-card__header">
+                <div className="admin-drive-card__title">
+                  <span className="admin-drive-card__brand-icon" data-kind={d.kind}>
+                    {d.kind.substring(0, 2)}
+                  </span>
+                  <span>{d.name || d.id}</span>
+                </div>
+                <StatusTag kind={d.kind} status={d.status} error={d.lastError} hasCred={d.hasCredential} />
+              </div>
+
+              <div className="admin-drive-card__info">
+                <div className="admin-drive-card__metric">
+                  <span>封面数 (就绪/失败)</span>
+                  <strong>
+                    {d.thumbnailReadyCount ?? 0}
+                    <span style={{ fontSize: "11px", fontWeight: "normal", color: "var(--text-faint)" }}>
+                      {" "}/ {d.thumbnailFailedCount ?? 0}
                     </span>
-                  ) : (
-                    d.scanRootId || d.rootId
-                  )}
-                </td>
-                <td data-label="本地占用">
-                  <StorageCell usage={storage?.drives[d.id]} />
-                </td>
-                <td data-label="封面">
-                  <GenerationCounts
-                    ready={d.thumbnailReadyCount}
-                    pending={d.thumbnailPendingCount}
-                    failed={d.thumbnailFailedCount}
-                  />
-                </td>
-                <td data-label="Teaser">
-                  <GenerationCounts
-                    ready={d.teaserReadyCount}
-                    pending={d.teaserPendingCount}
-                    failed={d.teaserFailedCount}
-                  />
-                </td>
-                <td className="is-actions" data-label="操作">
-                  <button className="admin-btn" onClick={() => handleRescan(d)}>
-                    {d.kind === "spider91" ? (
-                      <>
-                        <Download size={13} /> 立即抓取
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw size={13} /> 重扫
-                      </>
-                    )}
-                  </button>{" "}
-                  <button
-                    className={`admin-btn ${d.teaserEnabled ? "is-success" : ""}`}
-                    onClick={() => handleToggleTeaser(d)}
-                    disabled={togglingTeaserId === d.id}
-                    title={
-                      d.teaserEnabled
-                        ? "本盘 Teaser 生成已开启，点击关闭"
-                        : "本盘 Teaser 生成已关闭，点击开启"
-                    }
-                  >
-                    {d.teaserEnabled ? <Power size={13} /> : <PowerOff size={13} />}
-                    <span className="admin-btn__label">
-                      {togglingTeaserId === d.id
-                        ? "切换中..."
-                        : d.teaserEnabled
-                        ? "Teaser: 开"
-                        : "Teaser: 关"}
+                  </strong>
+                </div>
+                <div className="admin-drive-card__metric">
+                  <span>Teaser 数 (就绪/失败)</span>
+                  <strong>
+                    {d.teaserReadyCount ?? 0}
+                    <span style={{ fontSize: "11px", fontWeight: "normal", color: "var(--text-faint)" }}>
+                      {" "}/ {d.teaserFailedCount ?? 0}
                     </span>
-                  </button>{" "}
-                  <button
-                    className="admin-btn"
-                    disabled={(d.teaserFailedCount ?? 0) <= 0 || regenFailedId === d.id}
-                    onClick={() => handleRegenFailed(d)}
-                  >
-                    <RotateCcw size={13} />
-                    <span className="admin-btn__label">
-                      {regenFailedId === d.id ? "触发中..." : "重试失败 Teaser"}
-                    </span>
-                  </button>{" "}
-                  <button
-                    className="admin-btn"
-                    disabled={
-                      (d.thumbnailFailedCount ?? 0) <= 0 ||
-                      regenFailedThumbId === d.id
-                    }
-                    onClick={() => handleRegenFailedThumbnails(d)}
-                    title="把所有 thumbnail_status=failed 的封面重置为 pending 并重新入队生成"
-                  >
-                    <RotateCcw size={13} />
-                    <span className="admin-btn__label">
-                      {regenFailedThumbId === d.id ? "触发中..." : "重试失败封面"}
-                    </span>
-                  </button>{" "}
-                  <button
-                    className="admin-btn"
-                    onClick={() => setSkipDirsTarget(d)}
-                    title="设置扫描时要跳过的目录（命中即不递归）"
-                  >
-                    <FolderTree size={13} />
-                    <span className="admin-btn__label">
-                      跳过目录 {(d.skipDirIds?.length ?? 0) > 0 ? `(${d.skipDirIds.length})` : ""}
-                    </span>
-                  </button>{" "}
-                  <button className="admin-btn" onClick={() => openEdit(d)}>
-                    编辑
-                  </button>{" "}
-                  <button className="admin-btn is-danger" onClick={() => handleDelete(d)}>
-                    <Trash2 size={13} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  </strong>
+                </div>
+              </div>
+
+              <div className="admin-drive-card__footer">
+                <span>本地占用: {formatBytes(storage?.drives[d.id]?.totalBytes ?? 0)}</span>
+                <span className="admin-drive-card__manage-link">
+                  管理 <ChevronRight size={14} />
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
       <Modal
@@ -481,24 +654,6 @@ export function DrivesPage() {
           uploadTargets={uploadTargets}
         />
       </Modal>
-
-      {skipDirsTarget && (
-        <SkipDirsModal
-          drive={skipDirsTarget}
-          onClose={() => setSkipDirsTarget(null)}
-          onSaved={(saved) => {
-            setList((prev) =>
-              prev.map((item) =>
-                item.id === saved.id
-                  ? { ...item, skipDirIds: saved.skipDirIds }
-                  : item
-              )
-            );
-            setSkipDirsTarget(null);
-            show("已保存跳过目录，下次扫描生效", "success");
-          }}
-        />
-      )}
     </section>
   );
 }
@@ -526,19 +681,6 @@ function StorageSummary({ storage }: { storage: api.AdminDriveStorage }) {
   );
 }
 
-function StorageCell({ usage }: { usage?: api.DriveStorageUsage }) {
-  if (!usage || usage.totalBytes <= 0) {
-    return <span className="admin-storage-cell__empty">0 B</span>;
-  }
-  return (
-    <div className="admin-storage-cell">
-      <strong>{formatBytes(usage.totalBytes)}</strong>
-      <span>封面 {formatBytes(usage.thumbnailBytes)}</span>
-      <span>Teaser {formatBytes(usage.teaserBytes)}</span>
-    </div>
-  );
-}
-
 function GenerationCounts({
   ready,
   pending,
@@ -559,15 +701,6 @@ function GenerationCounts({
       <span className="admin-drive-teaser__metric is-failed">
         失败 {failed ?? 0}
       </span>
-    </div>
-  );
-}
-
-function GenerationStatusCell({ drive }: { drive: api.AdminDrive }) {
-  return (
-    <div className="admin-generation-statuses">
-      <GenerationStatusLine label="封面" status={drive.thumbnailGenerationStatus} />
-      <GenerationStatusLine label="预览" status={drive.previewGenerationStatus} />
     </div>
   );
 }
@@ -1075,27 +1208,6 @@ function defaultRootId(kind: Kind): string {
   return "0";
 }
 
-// formatRelativeTime 把 unix 秒格式化成"刚刚 / N 分钟前 / N 小时前 / N 天前"，
-// 用于网盘列表里显示 spider91 的 lastCrawlAt。
-function formatRelativeTime(unixSeconds: number): string {
-  if (!unixSeconds || unixSeconds <= 0) return "尚未抓取";
-  const nowMs = Date.now();
-  const thenMs = unixSeconds * 1000;
-  const deltaSec = Math.max(0, Math.floor((nowMs - thenMs) / 1000));
-  if (deltaSec < 60) return "刚刚";
-  const m = Math.floor(deltaSec / 60);
-  if (m < 60) return `${m} 分钟前`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
-  const d = Math.floor(h / 24);
-  if (d < 30) return `${d} 天前`;
-  // 太久了直接给个本地化的日期
-  try {
-    return new Date(thenMs).toLocaleDateString();
-  } catch {
-    return `${d} 天前`;
-  }
-}
 
 // ---------- SkipDirsModal ----------
 //
@@ -1112,19 +1224,28 @@ function formatRelativeTime(unixSeconds: number): string {
 //   看到自己选了什么
 // - 子目录的勾选不影响父目录的跳过判定（scanner 只按 ID 比对），但展示上加视觉
 //   线索：父目录被跳过 → 整个子树灰显（提示用户"已被祖先跳过"），仍可单独勾选
-type SkipDirsModalProps = {
+// ---------- SkipDirsPanel ----------
+//
+// "设置跳过目录"面板：
+// - 勾选目录加入跳过集合
+// - "保存更改"调 setDriveSkipDirIds 整体覆盖
+type SkipDirsPanelProps = {
   drive: api.AdminDrive;
-  onClose: () => void;
   onSaved: (saved: { id: string; skipDirIds: string[] }) => void;
 };
 
-function SkipDirsModal({ drive, onClose, onSaved }: SkipDirsModalProps) {
+function SkipDirsPanel({ drive, onSaved }: SkipDirsPanelProps) {
   const { show } = useToast();
   // selected 用 Set 方便 O(1) 增删 / contains 查询。
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(drive.skipDirIds ?? [])
   );
   const [saving, setSaving] = useState(false);
+
+  // 当外部的 drive 对象改变时，重置内部选中状态，确保在切换详情页时，数据能正确同步
+  useEffect(() => {
+    setSelected(new Set(drive.skipDirIds ?? []));
+  }, [drive.id, drive.skipDirIds]);
 
   const toggle = useCallback((id: string) => {
     setSelected((prev) => {
@@ -1154,29 +1275,25 @@ function SkipDirsModal({ drive, onClose, onSaved }: SkipDirsModalProps) {
   const selectedList = useMemo(() => Array.from(selected), [selected]);
 
   return (
-    <Modal
-      open
-      title={`设置跳过目录 — ${drive.name || drive.id}`}
-      onClose={onClose}
-      footer={
-        <>
-          <button className="admin-btn" onClick={onClose}>
-            取消
-          </button>
-          <button
-            className="admin-btn is-primary"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? "保存中..." : `保存（${selectedList.length}）`}
-          </button>
-        </>
-      }
-    >
+    <div className="admin-detail-card">
+      <header className="admin-detail-card__title">
+        <div className="admin-detail-card__title-left">
+          <FolderTree size={16} />
+          <span>扫描跳过目录</span>
+        </div>
+        <button
+          className="admin-btn is-primary"
+          onClick={handleSave}
+          disabled={saving}
+          style={{ padding: "4px 10px", fontSize: "12px", height: "auto" }}
+        >
+          {saving ? "保存中..." : `保存更改 (${selectedList.length})`}
+        </button>
+      </header>
+
       <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        <p className="admin-text-faint" style={{ margin: 0, fontSize: "13px" }}>
-          勾选要在扫描时跳过的目录。命中目录及其全部子目录都不会被递归扫描，
-          也不会进入新增/删除统计。下次扫描（凌晨流水线或手动重扫）生效。
+        <p className="admin-text-faint" style={{ margin: 0, fontSize: "12px", lineHeight: "1.5" }}>
+          勾选要在扫描时跳过的目录。命中目录及其全部子目录都不会被递归扫描。下次扫描生效。
         </p>
 
         <SelectedDirsChips
@@ -1185,15 +1302,7 @@ function SkipDirsModal({ drive, onClose, onSaved }: SkipDirsModalProps) {
           onRemove={toggle}
         />
 
-        <div
-          style={{
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "8px",
-            padding: "8px 4px",
-            maxHeight: "420px",
-            overflow: "auto",
-          }}
-        >
+        <div className="admin-detail-tree-container">
           <DirTreeNode
             driveId={drive.id}
             id="" // 空 = 让后端用 RootID
@@ -1206,7 +1315,7 @@ function SkipDirsModal({ drive, onClose, onSaved }: SkipDirsModalProps) {
           />
         </div>
       </div>
-    </Modal>
+    </div>
   );
 }
 

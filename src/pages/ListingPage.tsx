@@ -56,12 +56,12 @@ export default function ListingPage() {
 
   useEffect(() => {
     document.title = keyword
-      ? `搜索 "${keyword}" · 视频聚合站`
+      ? `搜索 "${keyword}" · 91`
       : tag
-      ? `标签 ${tag} · 视频聚合站`
+      ? `标签 ${tag} · 91`
       : cat
-      ? `分类 ${cat} · 视频聚合站`
-      : "视频列表 · 视频聚合站";
+      ? `分类 ${cat} · 91`
+      : "视频列表 · 91";
 
     let active = true;
     setLoading(true);

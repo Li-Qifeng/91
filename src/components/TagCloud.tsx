@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchTags, type TagItem } from "@/data/videos";
 
@@ -6,6 +6,7 @@ export function TagCloud() {
   const [params] = useSearchParams();
   const activeTag = params.get("tag");
   const [tags, setTags] = useState<TagItem[]>([]);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -16,6 +17,76 @@ export function TagCloud() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    const slider = containerRef.current;
+    if (!slider) return;
+
+    let isDown = false;
+    let startX = 0;
+    let scrollLeft = 0;
+    let isDragging = false;
+
+    const handleMouseDown = (e: MouseEvent) => {
+      isDown = true;
+      isDragging = false;
+      slider.classList.add("is-dragging");
+      startX = e.pageX - slider.offsetLeft;
+      scrollLeft = slider.scrollLeft;
+    };
+
+    const handleMouseLeave = () => {
+      isDown = false;
+      slider.classList.remove("is-dragging");
+    };
+
+    const handleMouseUp = () => {
+      isDown = false;
+      slider.classList.remove("is-dragging");
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDown) return;
+      e.preventDefault();
+      const x = e.pageX - slider.offsetLeft;
+      const walk = (x - startX) * 1.5;
+      if (Math.abs(x - startX) > 10) {
+        isDragging = true;
+      }
+      slider.scrollLeft = scrollLeft - walk;
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY !== 0) {
+        e.preventDefault();
+        slider.scrollLeft += e.deltaY;
+      }
+    };
+
+    const handleClick = (e: MouseEvent) => {
+      if (isDragging) {
+        e.preventDefault();
+        e.stopPropagation();
+        isDragging = false;
+      }
+    };
+
+    slider.addEventListener("mousedown", handleMouseDown);
+    slider.addEventListener("mouseleave", handleMouseLeave);
+    slider.addEventListener("mouseup", handleMouseUp);
+    slider.addEventListener("mousemove", handleMouseMove);
+    slider.addEventListener("wheel", handleWheel, { passive: false });
+    slider.addEventListener("click", handleClick, { capture: true });
+
+    return () => {
+      slider.removeEventListener("mousedown", handleMouseDown);
+      slider.removeEventListener("mouseleave", handleMouseLeave);
+      slider.removeEventListener("mouseup", handleMouseUp);
+      slider.removeEventListener("mousemove", handleMouseMove);
+      slider.removeEventListener("wheel", handleWheel);
+      slider.removeEventListener("click", handleClick, { capture: true });
+    };
+  }, [tags]);
 
   if (tags.length === 0) return null;
 
@@ -41,7 +112,7 @@ export function TagCloud() {
 
   return (
     <div className="tag-cloud-container" aria-label="热门分类">
-      <div className="tag-cloud__grid">
+      <div className="tag-cloud__grid" ref={containerRef}>
         <div className="tag-cloud__row">
           {row1.map(renderTag)}
         </div>

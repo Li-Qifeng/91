@@ -35,7 +35,7 @@ export default function VideoDetailPage() {
       setDetail(d);
       setTags(tagList);
       setLoading(false);
-      document.title = d ? `${d.title} · 视频聚合站` : "视频不存在";
+      document.title = d ? `${d.title} · 91` : "视频不存在";
     });
     return () => {
       active = false;

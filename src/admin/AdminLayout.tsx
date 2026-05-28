@@ -25,7 +25,7 @@ export function AdminLayout() {
           <span className="admin-sidebar__brand-mark">
             <Play size={14} fill="#000" />
           </span>
-          视频站后台
+          <span className="admin-sidebar__brand-text">91后台</span>
         </div>
         <nav className="admin-nav">
           <NavLink to="/" className="admin-nav__link">
@@ -61,7 +61,7 @@ export function AdminLayout() {
               `admin-nav__link ${isActive ? "is-active" : ""}`
             }
           >
-            <Palette size={16} /> 外观
+            <Palette size={16} /> 主题外观
           </NavLink>
         </nav>
         <div className="admin-sidebar__footer">

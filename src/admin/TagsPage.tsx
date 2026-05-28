@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Plus, RefreshCw, Tags } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Film, Plus, RefreshCw, Search, Tags } from "lucide-react";
 import * as api from "./api";
 import { useToast } from "./ToastContext";
 
@@ -9,6 +9,8 @@ export function TagsPage() {
   const [aliases, setAliases] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterSource, setFilterSource] = useState<string>("all");
   const { show } = useToast();
 
   async function refresh() {
@@ -43,6 +45,43 @@ export function TagsPage() {
     }
   }
 
+  const stats = useMemo(() => {
+    let totalVideos = 0;
+    let systemCount = 0;
+    let userCount = 0;
+    let collectionCount = 0;
+    let legacyCount = 0;
+
+    tags.forEach((t) => {
+      totalVideos += t.count ?? 0;
+      if (t.source === "system") systemCount++;
+      else if (t.source === "user") userCount++;
+      else if (t.source === "collection") collectionCount++;
+      else if (t.source === "legacy") legacyCount++;
+    });
+
+    return {
+      totalTags: tags.length,
+      totalVideos,
+      systemCount,
+      userCount,
+      collectionCount,
+      legacyCount,
+    };
+  }, [tags]);
+
+  const filteredTags = useMemo(() => {
+    return tags.filter((t) => {
+      const query = searchQuery.trim().toLowerCase();
+      const matchesSearch =
+        !query ||
+        t.label.toLowerCase().includes(query) ||
+        (t.aliases ?? []).some((a) => a.toLowerCase().includes(query));
+      const matchesSource = filterSource === "all" || t.source === filterSource;
+      return matchesSearch && matchesSource;
+    });
+  }, [tags, searchQuery, filterSource]);
+
   return (
     <section>
       <header className="admin-page__header">
@@ -52,78 +91,153 @@ export function TagsPage() {
         </button>
       </header>
 
-      <div className="admin-card">
-        <div className="admin-card__title">
-          <Tags size={15} /> 新增标签
-        </div>
-        <div className="admin-form">
-          <div className="admin-form__row">
-            <label>标签名</label>
-            <input
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="例如：清纯"
-            />
-          </div>
-          <div className="admin-form__row">
-            <label>别名</label>
-            <input
-              value={aliases}
-              onChange={(e) => setAliases(e.target.value)}
-              placeholder="逗号分隔，例如：纯欲, 清新, 乖巧"
-            />
-            <div className="admin-form__help">
-              新增后会按标签名和别名匹配已有视频的标题、作者和目录。
+      <div className="admin-tags-layout">
+        {/* 左栏：创建与统计 */}
+        <div>
+          <div className="admin-card">
+            <div className="admin-card__title">
+              <Plus size={15} /> 新增分类标签
+            </div>
+            <div className="admin-form">
+              <div className="admin-form__row">
+                <label>标签名</label>
+                <input
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  placeholder="例如：清纯"
+                />
+              </div>
+              <div className="admin-form__row">
+                <label>别名</label>
+                <input
+                  value={aliases}
+                  onChange={(e) => setAliases(e.target.value)}
+                  placeholder="逗号分隔，例如：纯欲, 清新"
+                />
+                <div className="admin-form__help">
+                  新增后会按别名和标签名匹配已有视频的标题、作者和目录并自动归类。
+                </div>
+              </div>
+              <button
+                className="admin-btn is-primary"
+                onClick={handleCreate}
+                disabled={saving || !label.trim()}
+              >
+                <Plus size={13} /> {saving ? "添加中..." : "添加并自动归类"}
+              </button>
             </div>
           </div>
-          <button
-            className="admin-btn is-primary"
-            onClick={handleCreate}
-            disabled={saving || !label.trim()}
-          >
-            <Plus size={13} /> {saving ? "添加中..." : "添加并归类"}
-          </button>
-        </div>
-      </div>
 
-      {loading ? (
-        <div className="admin-empty">加载中...</div>
-      ) : (
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>标签</th>
-              <th>视频数</th>
-              <th>来源</th>
-              <th>别名</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tags.map((tag) => (
-              <tr key={tag.id}>
-                <td data-label="标签">
-                  <span className="admin-pill">{tag.label}</span>
-                </td>
-                <td data-label="视频数">{tag.count}</td>
-                <td data-label="来源">{sourceLabel(tag.source)}</td>
-                <td data-label="别名">
-                  {(tag.aliases ?? []).length > 0 ? (
-                    <div className="admin-pills">
-                      {(tag.aliases ?? []).map((alias) => (
-                        <span key={alias} className="admin-pill">
+          <div className="admin-card">
+            <div className="admin-card__title">
+              <Tags size={15} /> 系统标签统计
+            </div>
+            <div className="admin-tag-stats-list">
+              <div className="admin-tag-stat-item">
+                <span>总标签数</span>
+                <strong>{stats.totalTags}</strong>
+              </div>
+              <div className="admin-tag-stat-item">
+                <span>关联视频次</span>
+                <strong>{stats.totalVideos}</strong>
+              </div>
+              <div className="admin-tag-stat-item">
+                <span>系统提取</span>
+                <strong>{stats.systemCount}</strong>
+              </div>
+              <div className="admin-tag-stat-item">
+                <span>用户创建</span>
+                <strong>{stats.userCount}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 右栏：看板网格与搜索栏 */}
+        <div>
+          <div className="admin-tags-toolbar">
+            <div className="admin-tags-search">
+              <Search className="admin-tags-search__icon" size={14} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索标签名或别名..."
+              />
+            </div>
+
+            <div className="admin-tags-filter-tabs">
+              <button
+                type="button"
+                className={`admin-tags-filter-tab ${filterSource === "all" ? "is-active" : ""}`}
+                onClick={() => setFilterSource("all")}
+              >
+                全部 ({tags.length})
+              </button>
+              <button
+                type="button"
+                className={`admin-tags-filter-tab ${filterSource === "system" ? "is-active" : ""}`}
+                onClick={() => setFilterSource("system")}
+              >
+                系统 ({stats.systemCount})
+              </button>
+              <button
+                type="button"
+                className={`admin-tags-filter-tab ${filterSource === "user" ? "is-active" : ""}`}
+                onClick={() => setFilterSource("user")}
+              >
+                用户 ({stats.userCount})
+              </button>
+              <button
+                type="button"
+                className={`admin-tags-filter-tab ${filterSource === "collection" ? "is-active" : ""}`}
+                onClick={() => setFilterSource("collection")}
+              >
+                合集 ({stats.collectionCount})
+              </button>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="admin-empty">加载中...</div>
+          ) : filteredTags.length === 0 ? (
+            <div className="admin-card admin-empty">
+              没有找到匹配的标签。
+            </div>
+          ) : (
+            <div className="admin-tags-grid">
+              {filteredTags.map((tag) => (
+                <div key={tag.id} className="admin-tag-card">
+                  <div className="admin-tag-card__head">
+                    <span className="admin-tag-card__title">{tag.label}</span>
+                    <span className="admin-tag-card__source-badge" data-source={tag.source}>
+                      {sourceLabel(tag.source)}
+                    </span>
+                  </div>
+
+                  {tag.aliases && tag.aliases.length > 0 && (
+                    <div className="admin-tag-card__aliases">
+                      {tag.aliases.map((alias) => (
+                        <span key={alias} className="admin-tag-card__alias-pill">
                           {alias}
                         </span>
                       ))}
                     </div>
-                  ) : (
-                    <span className="admin-text-faint">—</span>
                   )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+
+                  <div className="admin-tag-card__footer">
+                    <span>ID: {tag.id}</span>
+                    <span className="admin-tag-card__count">
+                      <Film size={11} />
+                      <strong>{tag.count} 视频</strong>
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

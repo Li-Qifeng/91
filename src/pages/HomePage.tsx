@@ -33,7 +33,7 @@ export default function HomePage() {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    document.title = "首页 · 视频聚合站";
+    document.title = "首页 · 91";
 
     // 有缓存说明是 SPA 内导航返回，不重新请求
     if (cachedRanking !== null) return;

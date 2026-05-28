@@ -4,6 +4,7 @@ import {
   Film,
   Menu,
   Play,
+  Settings,
   Sparkles,
   Upload,
   X,
@@ -13,6 +14,7 @@ const navItems = [
   { to: "/shorts", label: "短视频", icon: Sparkles },
   { to: "/upload", label: "上传", icon: Upload },
   { to: "/list", label: "视频", icon: Film },
+  { to: "/admin", label: "后台", icon: Settings },
 ];
 
 export function MainNav() {
@@ -25,7 +27,7 @@ export function MainNav() {
           <span className="main-nav__logo-mark">
             <Play size={16} fill="#000" />
           </span>
-          视频站
+          <span className="main-nav__logo-text">91</span>
         </NavLink>
 
         <ul className="main-nav__list" role="menubar">
