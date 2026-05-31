@@ -440,8 +440,8 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// shortsNextReq 客户端把当前轮已看过的 video id 列表传上来，
-// 服务器从未在列表中的视频里随机抽 count 个返回。
+// shortsNextReq 客户端把当前轮已看过的 video id 列表传上来。
+// PreferredFromVideoID 来自短视频页最近一次点赞成功的视频，用于优先推荐相似标签。
 type shortsNextReq struct {
 	SeenIDs              []string `json:"seenIds"`
 	Count                int      `json:"count"`

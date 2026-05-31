@@ -121,7 +121,6 @@ export default function ShortsPage() {
   // seenIds 用 ref 维护，方便在异步 callback 里读到最新值
   const seenIdsRef = useRef<string[]>(loadSeenIds());
   const preferredFromVideoIdRef = useRef<string | null>(null);
-  const reportedPreferenceIdsRef = useRef<Set<string>>(new Set());
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   // 整个页面根元素，用于 requestFullscreen
@@ -165,6 +164,11 @@ export default function ShortsPage() {
         );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as { likes?: number };
+        if (liked) {
+          preferredFromVideoIdRef.current = videoId;
+        } else if (preferredFromVideoIdRef.current === videoId) {
+          preferredFromVideoIdRef.current = null;
+        }
         return typeof data.likes === "number" ? data.likes : null;
       } catch {
         // 请求失败：回滚集合，让 Slide 自己回滚 UI
@@ -184,12 +188,6 @@ export default function ShortsPage() {
     (videoId: string) => likedIdsRef.current.has(videoId),
     []
   );
-
-  const handlePreferenceReady = useCallback((item: ShortsItem) => {
-    if (reportedPreferenceIdsRef.current.has(item.id)) return;
-    reportedPreferenceIdsRef.current.add(item.id);
-    preferredFromVideoIdRef.current = item.id;
-  }, []);
 
   /**
    * 向后端请求下一批不重复的短视频，追加到 items 末尾。
@@ -634,7 +632,6 @@ export default function ShortsPage() {
             onLikeToggle={handleLikeToggle}
             hasLiked={hasLiked}
             onHideSuccess={handleHideSuccess}
-            onPreferenceReady={handlePreferenceReady}
             showHud={showHud}
           />
         ))}
@@ -668,7 +665,6 @@ type SlideProps = {
   /** 父组件查询某 id 是否已经在本次会话内点过赞 */
   hasLiked: (videoId: string) => boolean;
   onHideSuccess: (index: number) => void;
-  onPreferenceReady: (item: ShortsItem) => void;
   showHud: (text: string, icon?: React.ReactNode) => void;
 };
 
@@ -692,7 +688,6 @@ function ShortsSlide({
   onLikeToggle,
   hasLiked,
   onHideSuccess,
-  onPreferenceReady,
   showHud,
 }: SlideProps) {
   const localRef = useRef<HTMLVideoElement | null>(null);
@@ -710,10 +705,9 @@ function ShortsSlide({
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [scrubbing, setScrubbing] = useState(false);
+  const scrubbingRef = useRef(false);
   // 拖动开始时是否在播：用于拖完后判断要不要 resume
   const wasPlayingRef = useRef(true);
-
-  const preferenceFiredRef = useRef(false);
 
   // 点赞数和"是否已点过赞"状态。
   // 初始 likes 取自后端返回的列表项；isLiked 仅控制视觉态，
@@ -739,10 +733,6 @@ function ShortsSlide({
     setIsLiked(hasLiked(item.id));
   }, [item.id, item.likes, hasLiked]);
 
-  useEffect(() => {
-    preferenceFiredRef.current = false;
-  }, [item.id]);
-
   const setRef = useCallback(
     (el: HTMLVideoElement | null) => {
       localRef.current = el;
@@ -756,6 +746,7 @@ function ShortsSlide({
     if (!isActive) {
       setPaused(false);
       setScrubbing(false);
+      scrubbingRef.current = false;
       setIsBuffering(false);
       setPlayPauseHud(null);
     }
@@ -790,17 +781,7 @@ function ShortsSlide({
     };
     const handleTime = () => {
       // 拖动期间不要被 timeupdate 覆盖 UI
-      if (!scrubbing) setCurrentTime(video.currentTime);
-      if (
-        isActive &&
-        shouldMount &&
-        !isMarkedHidden &&
-        !preferenceFiredRef.current &&
-        video.currentTime >= 3
-      ) {
-        preferenceFiredRef.current = true;
-        onPreferenceReady(item);
-      }
+      if (!scrubbingRef.current) setCurrentTime(video.currentTime);
     };
     const handleWaiting = () => {
       setIsBuffering(true);
@@ -842,7 +823,7 @@ function ShortsSlide({
       video.removeEventListener("canplay", handlePlayingOrCanPlay);
       video.removeEventListener("volumechange", handleVolumeChange);
     };
-  }, [shouldMount, scrubbing, muted, volume, setMuted, setVolume, isActive, isMarkedHidden, item, onPreferenceReady]);
+  }, [muted, volume, setMuted, setVolume]);
 
   // 长按 2 倍速：直接绑原生事件
   useEffect(() => {
@@ -1052,11 +1033,16 @@ function ShortsSlide({
   // ---- 进度条拖动 ----
   // 触摸进度条时：暂停 → 跟随手指更新 currentTime → 松手 resume
   function handleProgressPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    const video = localRef.current;
-    if (!video || !duration) return;
     e.preventDefault();
     e.stopPropagation();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const video = localRef.current;
+    const seekDuration = getSeekDuration(video);
+    if (!video || !seekDuration) return;
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
     wasPlayingRef.current = !video.paused;
     if (!video.paused) {
       try {
@@ -1065,17 +1051,19 @@ function ShortsSlide({
         // ignore
       }
     }
+    scrubbingRef.current = true;
     setScrubbing(true);
-    applyProgressFromEvent(e);
+    applyProgressFromEvent(e, seekDuration);
   }
   function handleProgressPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!scrubbing) return;
+    if (!scrubbingRef.current) return;
     e.preventDefault();
     e.stopPropagation();
     applyProgressFromEvent(e);
   }
   function handleProgressPointerEnd(e: React.PointerEvent<HTMLDivElement>) {
-    if (!scrubbing) return;
+    if (!scrubbingRef.current) return;
+    e.preventDefault();
     e.stopPropagation();
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
@@ -1083,17 +1071,30 @@ function ShortsSlide({
       // ignore
     }
     const video = localRef.current;
+    scrubbingRef.current = false;
     setScrubbing(false);
     if (video && wasPlayingRef.current) {
       video.play().catch(() => undefined);
     }
   }
-  function applyProgressFromEvent(e: React.PointerEvent<HTMLDivElement>) {
+  function getSeekDuration(video: HTMLVideoElement | null) {
+    if (duration > 0) return duration;
+    if (video && Number.isFinite(video.duration) && video.duration > 0) {
+      setDuration(video.duration);
+      return video.duration;
+    }
+    return 0;
+  }
+  function applyProgressFromEvent(
+    e: React.PointerEvent<HTMLDivElement>,
+    knownDuration?: number
+  ) {
     const video = localRef.current;
-    if (!video || !duration) return;
+    const seekDuration = knownDuration ?? getSeekDuration(video);
+    if (!video || !seekDuration) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = clamp((e.clientX - rect.left) / rect.width, 0, 1);
-    const next = ratio * duration;
+    const next = ratio * seekDuration;
     setCurrentTime(next);
     try {
       video.currentTime = next;
@@ -1266,6 +1267,7 @@ function ShortsSlide({
           onPointerMove={handleProgressPointerMove}
           onPointerUp={handleProgressPointerEnd}
           onPointerCancel={handleProgressPointerEnd}
+          onLostPointerCapture={handleProgressPointerEnd}
           onClick={(e) => e.stopPropagation()}
         >
           <div
