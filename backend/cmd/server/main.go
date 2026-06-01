@@ -182,6 +182,9 @@ func main() {
 		OnRegenFailedThumbnails: func(driveID string) {
 			go app.regenFailedThumbnails(ctx, driveID)
 		},
+		OnRegenFailedFingerprints: func(driveID string) {
+			go app.regenFailedFingerprints(ctx, driveID)
+		},
 		GetDriveGenerationStatuses: func() map[string]api.DriveGenerationStatuses {
 			return app.driveGenerationStatuses()
 		},
@@ -1549,6 +1552,42 @@ func (a *App) regenFailedThumbnails(ctx context.Context, driveID string) {
 		queued++
 	}
 	log.Printf("[thumb] enqueued failed thumbnails for regen drive=%s queued=%d", driveID, queued)
+}
+
+func (a *App) regenFailedFingerprints(ctx context.Context, driveID string) {
+	items, err := a.cat.ListVideosByFingerprintStatus(ctx, driveID, "failed", 0)
+	if err != nil {
+		log.Printf("[fingerprint] list failed videos for regen drive=%s: %v", driveID, err)
+		return
+	}
+	a.mu.Lock()
+	fingerprintWorker := a.fingerprintWorkers[driveID]
+	a.mu.Unlock()
+	if fingerprintWorker == nil {
+		log.Printf("[fingerprint] regen failed drive=%s skipped: fingerprint worker not found", driveID)
+		return
+	}
+	log.Printf("[fingerprint] enqueue failed videos for regen drive=%s count=%d", driveID, len(items))
+	queued := 0
+	for _, v := range items {
+		if err := ctx.Err(); err != nil {
+			log.Printf("[fingerprint] enqueue failed canceled drive=%s queued=%d: %v", driveID, queued, err)
+			return
+		}
+		if err := a.cat.UpdateVideoFingerprint(ctx, v.ID, "", "pending", ""); err != nil {
+			log.Printf("[fingerprint] reset failed video %s drive=%s: %v", v.ID, driveID, err)
+			continue
+		}
+		v.SampledSHA256 = ""
+		v.FingerprintStatus = "pending"
+		v.FingerprintError = ""
+		if !fingerprintWorker.EnqueueBlocking(ctx, v) {
+			log.Printf("[fingerprint] enqueue failed canceled drive=%s queued=%d", driveID, queued)
+			return
+		}
+		queued++
+	}
+	log.Printf("[fingerprint] enqueued failed videos for regen drive=%s queued=%d", driveID, queued)
 }
 
 // listScanTargetIDs 返回 nightly Phase 1 应扫描的所有 drive ID

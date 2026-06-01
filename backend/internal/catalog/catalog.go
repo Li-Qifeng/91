@@ -765,6 +765,37 @@ func (c *Catalog) ListVideosNeedingFingerprint(ctx context.Context, driveID stri
 	return out, rows.Err()
 }
 
+// ListVideosByFingerprintStatus lists visible videos on a drive by fingerprint status.
+// It is used by the admin "retry failed fingerprints" action to reset failed rows
+// back to pending and enqueue them again.
+func (c *Catalog) ListVideosByFingerprintStatus(ctx context.Context, driveID, status string, limit int) ([]*Video, error) {
+	if limit <= 0 {
+		limit = 10000
+	}
+	rows, err := c.db.QueryContext(ctx,
+		`SELECT `+allVideoCols+` FROM videos
+		 WHERE drive_id = ?
+		   AND COALESCE(sampled_sha256, '') = ''
+		   AND COALESCE(fingerprint_status, 'pending') = ?
+		   AND COALESCE(hidden, 0) = 0
+		 ORDER BY created_at ASC, id ASC
+		 LIMIT ?`,
+		driveID, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Video
+	for rows.Next() {
+		v, err := scanVideo(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 func (c *Catalog) UpdateVideoFingerprint(ctx context.Context, id, sampledSHA256, status, errText string) error {
 	sampledSHA256 = normalizeContentHash(sampledSHA256)
 	if status == "" {

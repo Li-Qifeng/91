@@ -46,6 +46,7 @@ type AdminServer struct {
 	OnRegenAllPreviews         func()
 	OnRegenFailedPreviews      func(driveID string)
 	OnRegenFailedThumbnails    func(driveID string)
+	OnRegenFailedFingerprints  func(driveID string)
 	GetDriveGenerationStatuses func() map[string]DriveGenerationStatuses
 	// OnTeaserEnabledChanged 在 per-drive teaser 开关被切换后调用。
 	// enabled=true 时上层应该重新把 pending teaser 入队（类似旧的全局开关从关到开）；
@@ -121,6 +122,7 @@ func (a *AdminServer) Register(r chi.Router) {
 			r.Get("/drives/{id}/dirtree", a.handleListDriveDirTree)
 			r.Post("/drives/{id}/previews/failed/regenerate", a.handleRegenFailedPreviews)
 			r.Post("/drives/{id}/thumbnails/failed/regenerate", a.handleRegenFailedThumbnails)
+			r.Post("/drives/{id}/fingerprints/failed/regenerate", a.handleRegenFailedFingerprints)
 
 			// 视频
 			r.Get("/videos", a.handleAdminListVideos)
@@ -903,6 +905,16 @@ func (a *AdminServer) handleRegenFailedThumbnails(w http.ResponseWriter, r *http
 	id := chi.URLParam(r, "id")
 	if a.OnRegenFailedThumbnails != nil {
 		a.OnRegenFailedThumbnails(id)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+}
+
+// handleRegenFailedFingerprints triggers regeneration for all failed sampled
+// fingerprints on a drive. It mirrors the failed teaser/thumbnail retry endpoints.
+func (a *AdminServer) handleRegenFailedFingerprints(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if a.OnRegenFailedFingerprints != nil {
+		a.OnRegenFailedFingerprints(id)
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
 }

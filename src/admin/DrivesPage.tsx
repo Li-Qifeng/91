@@ -93,9 +93,9 @@ export function DrivesPage() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [regenFailedId, setRegenFailedId] = useState("");
-  // 与 regenFailedId 并列：失败封面重新入队按钮的 disable 状态。两套独立按钮 →
-  // 两个 state 互不阻塞，避免操作 teaser 时锁住封面那条按钮（反之亦然）。
+  // 失败重试按钮各自维护 pending 状态，避免操作 teaser / 封面 / 指纹时互相锁住。
   const [regenFailedThumbId, setRegenFailedThumbId] = useState("");
+  const [regenFailedFingerprintId, setRegenFailedFingerprintId] = useState("");
   // togglingTeaserId 在请求未返回前禁用按钮，避免连点导致两次切换互相覆盖。
   const [togglingTeaserId, setTogglingTeaserId] = useState("");
   const [scanningAll, setScanningAll] = useState(false);
@@ -310,6 +310,19 @@ export function DrivesPage() {
     }
   }
 
+  async function handleRegenFailedFingerprints(d: api.AdminDrive) {
+    setRegenFailedFingerprintId(d.id);
+    try {
+      await api.regenFailedFingerprints(d.id);
+      show("已触发失败指纹重新生成", "success");
+      refresh();
+    } catch (e) {
+      show(e instanceof Error ? e.message : "触发失败", "error");
+    } finally {
+      setRegenFailedFingerprintId("");
+    }
+  }
+
   async function handleToggleTeaser(d: api.AdminDrive) {
     const next = !d.teaserEnabled;
     setTogglingTeaserId(d.id);
@@ -479,14 +492,14 @@ export function DrivesPage() {
                     style={{ padding: "4px 10px", fontSize: "11px" }}
                   >
                     {d.teaserEnabled ? <Power size={11} /> : <PowerOff size={11} />}
-                    <span>{d.teaserEnabled ? "Teaser: 开" : "Teaser: 关"}</span>
+                    <span>{d.teaserEnabled ? "预览视频生成：开" : "预览视频生成：关"}</span>
                   </button>
                 </div>
               </header>
 
               <div className="admin-detail-grid">
                 <div className="admin-detail-row">
-                  <span className="admin-detail-label">封面状态</span>
+                  <span className="admin-detail-label">封面生成状态</span>
                   <div className="admin-detail-value">
                     <GenerationStatusLine label="封面" status={d.thumbnailGenerationStatus} />
                   </div>
@@ -503,13 +516,13 @@ export function DrivesPage() {
                   </div>
                 </div>
                 <div className="admin-detail-row">
-                  <span className="admin-detail-label">Teaser 状态</span>
+                  <span className="admin-detail-label">预览视频生成状态</span>
                   <div className="admin-detail-value">
                     <GenerationStatusLine label="预览" status={d.previewGenerationStatus} />
                   </div>
                 </div>
                 <div className="admin-detail-row">
-                  <span className="admin-detail-label">Teaser 数量</span>
+                  <span className="admin-detail-label">预览视频数量</span>
                   <div className="admin-detail-value">
                     <GenerationCounts
                       ready={d.teaserReadyCount}
@@ -519,13 +532,13 @@ export function DrivesPage() {
                   </div>
                 </div>
                 <div className="admin-detail-row">
-                  <span className="admin-detail-label">指纹状态</span>
+                  <span className="admin-detail-label">视频指纹生成状态</span>
                   <div className="admin-detail-value">
                     <GenerationStatusLine label="指纹" status={d.fingerprintGenerationStatus} />
                   </div>
                 </div>
                 <div className="admin-detail-row">
-                  <span className="admin-detail-label">指纹数量</span>
+                  <span className="admin-detail-label">视频指纹数量</span>
                   <div className="admin-detail-value">
                     <GenerationCounts
                       ready={d.fingerprintReadyCount}
@@ -553,6 +566,17 @@ export function DrivesPage() {
                   <RotateCcw size={13} />
                   <span>重试失败封面</span>
                 </button>
+                <button
+                  className="admin-btn"
+                  disabled={
+                    (d.fingerprintFailedCount ?? 0) <= 0 ||
+                    regenFailedFingerprintId === d.id
+                  }
+                  onClick={() => handleRegenFailedFingerprints(d)}
+                >
+                  <RotateCcw size={13} />
+                  <span>重试失败指纹</span>
+                </button>
               </div>
             </div>
 
@@ -570,7 +594,7 @@ export function DrivesPage() {
                   <span className="admin-detail-value">{formatBytes(driveStorage?.thumbnailBytes ?? 0)}</span>
                 </div>
                 <div className="admin-detail-row">
-                  <span className="admin-detail-label">Teaser 占用</span>
+                  <span className="admin-detail-label">预览视频占用</span>
                   <span className="admin-detail-value">{formatBytes(driveStorage?.teaserBytes ?? 0)}</span>
                 </div>
                 <div className="admin-detail-row">
@@ -739,7 +763,7 @@ function StorageSummary({ storage }: { storage: api.AdminDriveStorage }) {
         <strong>{formatBytes(storage.thumbnailBytes)}</strong>
       </div>
       <div className="admin-storage-summary__metric">
-        <span>Teaser 占用</span>
+        <span>预览视频占用</span>
         <strong>{formatBytes(storage.teaserBytes)}</strong>
       </div>
       <div className="admin-storage-summary__metric">

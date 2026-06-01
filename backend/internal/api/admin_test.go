@@ -598,6 +598,28 @@ func TestHandleListDrivesIncludesTeaserCounts(t *testing.T) {
 	}
 }
 
+func TestHandleRegenFailedFingerprintsInvokesHook(t *testing.T) {
+	called := ""
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/drives/drive-one/fingerprints/failed/regenerate", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "drive-one")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rr := httptest.NewRecorder()
+
+	(&AdminServer{
+		OnRegenFailedFingerprints: func(driveID string) {
+			called = driveID
+		},
+	}).handleRegenFailedFingerprints(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if called != "drive-one" {
+		t.Fatalf("called drive = %q, want drive-one", called)
+	}
+}
+
 func TestHandleDriveStorageReportsLocalMediaUsage(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

@@ -243,6 +243,13 @@ export function regenFailedThumbnails(id: string) {
   );
 }
 
+export function regenFailedFingerprints(id: string) {
+  return request<{ ok: boolean }>(
+    `/drives/${encodeURIComponent(id)}/fingerprints/failed/regenerate`,
+    { method: "POST" }
+  );
+}
+
 // ---------- Videos ----------
 
 export type AdminVideo = {
