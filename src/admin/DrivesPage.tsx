@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   ChevronRight,
+  CircleStop,
   Download,
   FolderTree,
   HardDrive,
@@ -57,9 +59,12 @@ export function DrivesPage() {
   const [regenFailedFingerprintId, setRegenFailedFingerprintId] = useState("");
   const [togglingTeaserId, setTogglingTeaserId] = useState("");
   const [scanningAll, setScanningAll] = useState(false);
+  const [stoppingAll, setStoppingAll] = useState(false);
   const [trackingNightly, setTrackingNightly] = useState(false);
   const [scanningDriveId, setScanningDriveId] = useState("");
-  const [selectedDriveId, setSelectedDriveId] = useState<string | null>(null);
+  const [stoppingDriveId, setStoppingDriveId] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedDriveId = searchParams.get("drive") || null;
   const { show } = useToast();
   const pollConnectionLost = useRef(false);
   const nightlyBusy = scanningAll || nightlyStatus.running || nightlyStatus.queued;
@@ -71,6 +76,22 @@ export function DrivesPage() {
     () => list.filter((d) => d.kind === "pikpak" || d.kind === "p115" || d.kind === "p123" || d.kind === "onedrive"),
     [list]
   );
+
+  function openDriveDetail(id: string) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("drive", id);
+      return next;
+    });
+  }
+
+  function closeDriveDetail(options?: { replace?: boolean }) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("drive");
+      return next;
+    }, options);
+  }
 
   async function refresh() {
     setLoading(true);
@@ -254,7 +275,7 @@ export function DrivesPage() {
       show(`已删除，并清理 ${resp.deletedVideos ?? 0} 个视频`, "success");
       setDeleteTarget(null);
       if (selectedDriveId === d.id) {
-        setSelectedDriveId(null);
+        closeDriveDetail({ replace: true });
       }
       refresh();
     } catch (e) {
@@ -303,11 +324,51 @@ export function DrivesPage() {
     }
   }
 
+  async function handleStopAllTasks() {
+    if (stoppingAll) return;
+    setStoppingAll(true);
+    try {
+      const resp = await api.stopAllTasks();
+      setNightlyStatus(resp.status);
+      setTrackingNightly(false);
+      show(
+        resp.stoppedDrives > 0
+          ? `已停止 ${resp.stoppedDrives} 个网盘的当前任务`
+          : "没有正在运行的网盘任务",
+        "success"
+      );
+      refreshDriveList();
+    } catch (e) {
+      show(e instanceof Error ? e.message : "停止失败", "error");
+    } finally {
+      setStoppingAll(false);
+    }
+  }
+
+  async function handleStopDriveTasks(d: api.AdminDrive) {
+    if (stoppingDriveId) return;
+    setStoppingDriveId(d.id);
+    try {
+      const resp = await api.stopDriveTasks(d.id);
+      show(
+        resp.stopped
+          ? `已停止「${d.name || d.id}」的当前任务`
+          : `「${d.name || d.id}」没有正在运行的任务`,
+        "success"
+      );
+      refreshDriveList();
+    } catch (e) {
+      show(e instanceof Error ? e.message : "停止失败", "error");
+    } finally {
+      setStoppingDriveId("");
+    }
+  }
+
   async function handleRegenFailed(d: api.AdminDrive) {
     setRegenFailedId(d.id);
     try {
       await api.regenFailedPreviews(d.id);
-      show("已触发失败预览视频重新生成", "success");
+      show("已触发预览视频生成", "success");
       refresh();
     } catch (e) {
       show(e instanceof Error ? e.message : "触发失败", "error");
@@ -320,7 +381,7 @@ export function DrivesPage() {
     setRegenFailedThumbId(d.id);
     try {
       await api.regenFailedThumbnails(d.id);
-      show("已触发失败封面重新生成", "success");
+      show("已触发封面生成", "success");
       refresh();
     } catch (e) {
       show(e instanceof Error ? e.message : "触发失败", "error");
@@ -333,7 +394,7 @@ export function DrivesPage() {
     setRegenFailedFingerprintId(d.id);
     try {
       await api.regenFailedFingerprints(d.id);
-      show("已触发失败指纹重新生成", "success");
+      show("已触发指纹生成", "success");
       refresh();
     } catch (e) {
       show(e instanceof Error ? e.message : "触发失败", "error");
@@ -391,7 +452,7 @@ export function DrivesPage() {
           <button
             type="button"
             className="admin-drive-detail__back-btn"
-            onClick={() => setSelectedDriveId(null)}
+            onClick={() => closeDriveDetail({ replace: true })}
             title="返回网盘列表"
           >
             <ArrowLeft size={16} />
@@ -449,28 +510,40 @@ export function DrivesPage() {
               </div>
 
               <div className="admin-detail-actions">
-                <button
-                  type="button"
-                  className="admin-btn is-primary"
-                  onClick={() => handleRescan(d)}
-                  disabled={!!scanningDriveId}
-                >
-                  {d.kind === "spider91" ? (
-                    <>
-                      <Download size={13} className={scanningDriveId === d.id ? "admin-spin" : undefined} />
-                      {scanningDriveId === d.id ? "触发中..." : "立即抓取"}
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw size={13} className={scanningDriveId === d.id ? "admin-spin" : undefined} />
-                      {scanningDriveId === d.id ? "触发中..." : "立即重扫"}
-                    </>
-                  )}
-                </button>
+                <div className="admin-task-controls" aria-label="当前网盘任务控制">
+                  <button
+                    type="button"
+                    className="admin-btn is-primary"
+                    onClick={() => handleRescan(d)}
+                    disabled={!!scanningDriveId}
+                  >
+                    {d.kind === "spider91" ? (
+                      <>
+                        <Download size={13} className={scanningDriveId === d.id ? "admin-spin" : undefined} />
+                        {scanningDriveId === d.id ? "触发中..." : "立即抓取"}
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={13} className={scanningDriveId === d.id ? "admin-spin" : undefined} />
+                        {scanningDriveId === d.id ? "触发中..." : "立即重扫"}
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-btn is-stop"
+                    onClick={() => handleStopDriveTasks(d)}
+                    disabled={!!stoppingDriveId}
+                    title="停止此网盘当前的扫描、封面、预览视频和视频指纹生成任务。"
+                  >
+                    <CircleStop size={13} />
+                    {stoppingDriveId === d.id ? "停止中..." : "停止所有任务"}
+                  </button>
+                </div>
                 <button type="button" className="admin-btn" onClick={() => openEdit(d)}>
                   {d.kind === "spider91" ? "编辑配置" : "编辑配置凭证"}
                 </button>
-                <button type="button" className="admin-btn is-danger" onClick={() => setDeleteTarget(d)} style={{ marginLeft: "auto" }}>
+                <button type="button" className="admin-btn is-danger admin-detail-actions__danger" onClick={() => setDeleteTarget(d)}>
                   <Trash2 size={13} /> 删除网盘
                 </button>
               </div>
@@ -589,16 +662,27 @@ export function DrivesPage() {
     <section>
       <header className="admin-page__header">
         <h1 className="admin-page__title">网盘管理</h1>
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button
-            type="button"
-            className="admin-btn"
-            onClick={handleRunNightly}
-            disabled={scanningAll}
-            title={nightlyBusyText(nightlyStatus) || "立即扫描所有网盘。耗时较长，期间不要重复触发。"}
-          >
-            <PlayCircle size={14} /> {nightlyButtonText(nightlyStatus, scanningAll)}
-          </button>
+        <div className="admin-page__actions admin-drive-list-actions">
+          <div className="admin-task-controls" aria-label="所有网盘任务控制">
+            <button
+              type="button"
+              className="admin-btn"
+              onClick={handleRunNightly}
+              disabled={scanningAll}
+              title={nightlyBusyText(nightlyStatus) || "立即扫描所有网盘。耗时较长，期间不要重复触发。"}
+            >
+              <PlayCircle size={14} /> {nightlyButtonText(nightlyStatus, scanningAll)}
+            </button>
+            <button
+              type="button"
+              className="admin-btn is-stop"
+              onClick={handleStopAllTasks}
+              disabled={stoppingAll}
+              title="停止所有网盘当前的扫描、封面、预览视频和视频指纹生成任务。"
+            >
+              <CircleStop size={14} /> {stoppingAll ? "停止中..." : "停止所有网盘任务"}
+            </button>
+          </div>
           <button type="button" className="admin-btn is-primary" onClick={openCreate}>
             <Plus size={14} /> 新建网盘
           </button>
@@ -631,7 +715,7 @@ export function DrivesPage() {
               type="button"
               key={d.id}
               className="admin-drive-card"
-              onClick={() => setSelectedDriveId(d.id)}
+              onClick={() => openDriveDetail(d.id)}
               aria-label={`管理网盘 ${d.name || d.id}`}
             >
               <div className="admin-drive-card__header">

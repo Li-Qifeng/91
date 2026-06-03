@@ -115,6 +115,7 @@ type Runner struct {
 	queued         bool
 	startedAt      time.Time
 	lastFinishedAt time.Time
+	currentCancel  context.CancelFunc
 }
 
 // New constructs a Runner. cfg is shallow-copied; defaults are applied.
@@ -175,6 +176,28 @@ func (r *Runner) TriggerNow() bool {
 	}
 }
 
+// StopCurrent cancels the currently running pipeline and drops one queued
+// manual trigger, if present. It returns true when there was something to stop.
+func (r *Runner) StopCurrent() bool {
+	r.stateMu.Lock()
+	wasRunning := r.running
+	wasQueued := r.queued
+	cancel := r.currentCancel
+	r.queued = false
+	r.stateMu.Unlock()
+
+	if wasQueued {
+		select {
+		case <-r.trigger:
+		default:
+		}
+	}
+	if cancel != nil {
+		cancel()
+	}
+	return wasRunning || wasQueued || cancel != nil
+}
+
 func (r *Runner) Status() Status {
 	r.stateMu.Lock()
 	running := r.running
@@ -232,14 +255,25 @@ func shouldRun(now time.Time, lastRunDate string) bool {
 //
 // 流水线没有总耗时上限：一直跑到 ctx 取消（进程退出）或所有 phase 完成。
 func (r *Runner) runPipelineLocked(ctx context.Context, manual bool) {
+	if manual {
+		r.stateMu.Lock()
+		queued := r.queued
+		r.stateMu.Unlock()
+		if !queued {
+			log.Printf("[nightly] manual trigger was canceled before start")
+			return
+		}
+	}
 	if !r.runMu.TryLock() {
 		log.Printf("[nightly] another pipeline is already running, skipping this trigger")
 		return
 	}
 
 	started := r.cfg.Now()
-	r.markStarted(started)
+	runCtx, cancel := context.WithCancel(ctx)
+	r.markStarted(started, cancel)
 	defer func() {
+		cancel()
 		r.markFinished(r.cfg.Now())
 		r.runMu.Unlock()
 	}()
@@ -250,7 +284,7 @@ func (r *Runner) runPipelineLocked(ctx context.Context, manual bool) {
 	}
 	log.Printf("[nightly] pipeline (%s) start", mode)
 
-	r.runPipeline(ctx)
+	r.runPipeline(runCtx)
 
 	finished := r.cfg.Now()
 	log.Printf("[nightly] pipeline (%s) finish; took=%s", mode, finished.Sub(started).Round(time.Second))
@@ -264,12 +298,13 @@ func (r *Runner) runPipelineLocked(ctx context.Context, manual bool) {
 	}
 }
 
-func (r *Runner) markStarted(started time.Time) {
+func (r *Runner) markStarted(started time.Time, cancel context.CancelFunc) {
 	r.stateMu.Lock()
 	defer r.stateMu.Unlock()
 	r.running = true
 	r.queued = false
 	r.startedAt = started
+	r.currentCancel = cancel
 }
 
 func (r *Runner) markFinished(finished time.Time) {
@@ -278,6 +313,7 @@ func (r *Runner) markFinished(finished time.Time) {
 	r.running = false
 	r.startedAt = time.Time{}
 	r.lastFinishedAt = finished
+	r.currentCancel = nil
 }
 
 // runPipeline executes the three phases. It returns when the pipeline finishes

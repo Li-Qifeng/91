@@ -46,6 +46,8 @@ type AdminServer struct {
 	OnDriveDeleteCleanup       func(ctx context.Context, driveID string) (int, error)
 	OnDriveRemoved             func(driveID string)
 	OnScanRequested            func(driveID string)
+	OnStopDriveTasks           func(driveID string) bool
+	OnStopAllTasks             func() int
 	OnRegenPreview             func(videoID string)
 	OnRegenAllPreviews         func()
 	OnRegenFailedPreviews      func(driveID string)
@@ -126,6 +128,7 @@ func (a *AdminServer) Register(r chi.Router) {
 			r.Get("/drives/p123/qr/{uniID}", a.handleP123QRStatus)
 			r.Delete("/drives/{id}", a.handleDeleteDrive)
 			r.Post("/drives/{id}/rescan", a.handleRescan)
+			r.Post("/drives/{id}/tasks/stop", a.handleStopDriveTasks)
 			r.Post("/drives/{id}/teaser-enabled", a.handleSetDriveTeaserEnabled)
 			r.Post("/drives/{id}/skip-dirs", a.handleSetDriveSkipDirs)
 			r.Get("/drives/{id}/dirtree", a.handleListDriveDirTree)
@@ -152,6 +155,7 @@ func (a *AdminServer) Register(r chi.Router) {
 			r.Get("/update/check", a.handleCheckUpdate)
 			r.Get("/jobs/nightly/status", a.handleNightlyJobStatus)
 			r.Post("/jobs/nightly/run", a.handleRunNightlyJob)
+			r.Post("/tasks/stop", a.handleStopAllTasks)
 		})
 	})
 }
@@ -670,6 +674,18 @@ func (a *AdminServer) handleRescan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
 }
 
+func (a *AdminServer) handleStopDriveTasks(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	stopped := false
+	if a.OnStopDriveTasks != nil {
+		stopped = a.OnStopDriveTasks(id)
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":      true,
+		"stopped": stopped,
+	})
+}
+
 func (a *AdminServer) p123QRClient() *p123.QRClient {
 	return p123.NewQRClient(p123.QRConfig{
 		UserAPIBaseURL: a.P123UserAPIBaseURL,
@@ -720,6 +736,18 @@ func (a *AdminServer) handleRunNightlyJob(w http.ResponseWriter, r *http.Request
 
 func (a *AdminServer) handleNightlyJobStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a.nightlyJobStatus())
+}
+
+func (a *AdminServer) handleStopAllTasks(w http.ResponseWriter, r *http.Request) {
+	stoppedDrives := 0
+	if a.OnStopAllTasks != nil {
+		stoppedDrives = a.OnStopAllTasks()
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"ok":            true,
+		"stoppedDrives": stoppedDrives,
+		"status":        a.nightlyJobStatus(),
+	})
 }
 
 func (a *AdminServer) nightlyJobStatus() NightlyJobStatus {

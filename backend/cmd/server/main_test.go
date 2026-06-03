@@ -225,6 +225,170 @@ func TestRegisterPreviewWorkersBackfillsHistoricalFingerprints(t *testing.T) {
 	t.Fatalf("fingerprint status=%q sampled=%q, want ready with hash", got.FingerprintStatus, got.SampledSHA256)
 }
 
+func TestStopDriveTasksCancelsQueuedTasksAndReplacesWorkers(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	drv := &serverFakeDrive{}
+	registry := proxy.NewRegistry()
+	registry.Set("drive-id", drv)
+
+	gen := &serverFakeTeaserGenerator{}
+	oldWorker := preview.NewWorker(gen, cat, drv)
+	oldThumbWorker := preview.NewThumbWorker(gen, cat, drv)
+	oldFingerprintWorker := fingerprint.NewWorker(cat, drv, fingerprint.Config{})
+	oldCanceled := make(chan struct{})
+
+	app := &App{
+		cfg:                &config.Config{},
+		cat:                cat,
+		registry:           registry,
+		workers:            map[string]*preview.Worker{"drive-id": oldWorker},
+		thumbWorkers:       map[string]*preview.ThumbWorker{"drive-id": oldThumbWorker},
+		fingerprintWorkers: map[string]*fingerprint.Worker{"drive-id": oldFingerprintWorker},
+		cancels: map[string]context.CancelFunc{
+			"drive-id": func() { close(oldCanceled) },
+		},
+		scanQueued:          map[string]bool{"drive-id": true},
+		fingerprintQueueing: map[string]bool{"drive-id": true},
+	}
+	taskCtx, done := app.registerDriveTaskContext(ctx, "drive-id")
+	defer done()
+
+	if !app.stopDriveTasks(ctx, "drive-id") {
+		t.Fatal("stopDriveTasks returned false, want true")
+	}
+	select {
+	case <-oldCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("old worker cancel was not called")
+	}
+	if err := taskCtx.Err(); err == nil {
+		t.Fatal("registered drive task context was not canceled")
+	}
+	if app.scanQueued["drive-id"] {
+		t.Fatal("scan queue marker was not cleared")
+	}
+	if app.fingerprintQueueing["drive-id"] {
+		t.Fatal("fingerprint queue marker was not cleared")
+	}
+
+	app.mu.Lock()
+	newWorker := app.workers["drive-id"]
+	newThumbWorker := app.thumbWorkers["drive-id"]
+	newFingerprintWorker := app.fingerprintWorkers["drive-id"]
+	newCancel := app.cancels["drive-id"]
+	app.mu.Unlock()
+	if newWorker == nil || newWorker == oldWorker {
+		t.Fatalf("preview worker was not replaced")
+	}
+	if newThumbWorker == nil || newThumbWorker == oldThumbWorker {
+		t.Fatalf("thumb worker was not replaced")
+	}
+	if newFingerprintWorker == nil || newFingerprintWorker == oldFingerprintWorker {
+		t.Fatalf("fingerprint worker was not replaced")
+	}
+	if newCancel == nil {
+		t.Fatalf("replacement worker cancel was not registered")
+	}
+	newCancel()
+}
+
+func TestDriveGenerationStatusUsesWorkerQueueNotPendingCatalogRows(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	now := time.Now()
+	if err := cat.UpsertVideo(ctx, &catalog.Video{
+		ID:            "pending-thumb",
+		DriveID:       "drive-id",
+		FileID:        "file-id",
+		Title:         "Pending Thumb",
+		PreviewStatus: "ready",
+		PublishedAt:   now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("seed video: %v", err)
+	}
+	if err := cat.UpdateVideoMeta(ctx, "pending-thumb", catalog.VideoMetaPatch{ThumbnailStatus: "pending"}); err != nil {
+		t.Fatalf("mark thumbnail pending: %v", err)
+	}
+
+	thumbWorker := preview.NewThumbWorker(&serverFakeTeaserGenerator{}, cat, &serverFakeDrive{})
+	app := &App{
+		cat:                cat,
+		workers:            map[string]*preview.Worker{},
+		thumbWorkers:       map[string]*preview.ThumbWorker{"drive-id": thumbWorker},
+		fingerprintWorkers: map[string]*fingerprint.Worker{},
+	}
+
+	status := app.driveGenerationStatuses()["drive-id"].Thumbnail
+	if status.State != "idle" || status.QueueLength != 0 {
+		t.Fatalf("thumbnail status = %#v, want idle with empty worker queue", status)
+	}
+}
+
+func TestRegenFailedThumbnailsQueuesPendingRowsAfterStop(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(t.TempDir() + "/catalog.db")
+	if err != nil {
+		t.Fatalf("open catalog: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := cat.Close(); err != nil {
+			t.Fatalf("close catalog: %v", err)
+		}
+	})
+
+	now := time.Now()
+	if err := cat.UpsertVideo(ctx, &catalog.Video{
+		ID:            "pending-thumb",
+		DriveID:       "drive-id",
+		FileID:        "file-id",
+		Title:         "Pending Thumb",
+		PreviewStatus: "ready",
+		PublishedAt:   now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("seed video: %v", err)
+	}
+	if err := cat.UpdateVideoMeta(ctx, "pending-thumb", catalog.VideoMetaPatch{ThumbnailStatus: "pending"}); err != nil {
+		t.Fatalf("mark thumbnail pending: %v", err)
+	}
+
+	thumbWorker := preview.NewThumbWorker(&serverFakeTeaserGenerator{}, cat, &serverFakeDrive{})
+	app := &App{
+		cat:          cat,
+		thumbWorkers: map[string]*preview.ThumbWorker{"drive-id": thumbWorker},
+	}
+
+	app.regenFailedThumbnails(ctx, "drive-id")
+
+	if got := thumbWorker.Status().QueueLength; got != 1 {
+		t.Fatalf("thumb queue length = %d, want pending row re-enqueued", got)
+	}
+}
+
 func TestRunScanStartsFingerprintBeforeThumbnailAndPreviewDrain(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -6,8 +6,16 @@ const drivesPageSource = readFileSync(
   new URL("../src/admin/DrivesPage.tsx", import.meta.url),
   "utf8"
 );
+const driveComponentsSource = readFileSync(
+  new URL("../src/admin/drive/DriveComponents.tsx", import.meta.url),
+  "utf8"
+);
 const driveFormSource = readFileSync(
   new URL("../src/admin/drive/DriveForm.tsx", import.meta.url),
+  "utf8"
+);
+const apiSource = readFileSync(
+  new URL("../src/admin/api.ts", import.meta.url),
   "utf8"
 );
 const constantsSource = readFileSync(
@@ -149,4 +157,38 @@ test("drive type selector keeps primary source order", () => {
     { value: "quark", label: "夸克网盘" },
     { value: "wopan", label: "联通沃盘" },
   ]);
+});
+
+test("drive management exposes stop task controls", () => {
+  assert.match(apiSource, /stopDriveTasks/);
+  assert.match(apiSource, /\/drives\/\$\{encodeURIComponent\(id\)\}\/tasks\/stop/);
+  assert.match(apiSource, /stopAllTasks/);
+  assert.match(apiSource, /"\/tasks\/stop"/);
+  assert.match(drivesPageSource, /is-stop/);
+  assert.match(drivesPageSource, /停止所有任务/);
+  assert.match(drivesPageSource, /停止所有网盘任务/);
+});
+
+test("drive detail selection is stored in the URL history", () => {
+  assert.match(drivesPageSource, /useSearchParams/);
+  assert.match(drivesPageSource, /searchParams\.get\("drive"\)/);
+  assert.match(drivesPageSource, /function openDriveDetail\(id: string\)/);
+  assert.match(drivesPageSource, /next\.set\("drive", id\)/);
+  assert.match(drivesPageSource, /function closeDriveDetail/);
+  assert.match(drivesPageSource, /next\.delete\("drive"\)/);
+  assert.doesNotMatch(drivesPageSource, /setSelectedDriveId/);
+});
+
+test("drive generation actions can resume pending work after stop", () => {
+  assert.match(driveComponentsSource, /thumbnailPendingCount/);
+  assert.match(driveComponentsSource, /teaserPendingCount/);
+  assert.match(driveComponentsSource, /fingerprintPendingCount/);
+  assert.match(driveComponentsSource, /继续生成封面/);
+  assert.match(driveComponentsSource, /继续生成预览视频/);
+  assert.match(driveComponentsSource, /继续生成指纹/);
+});
+
+test("drive cards label fingerprint count as video fingerprint count", () => {
+  assert.match(driveComponentsSource, /视频指纹数 \(就绪\/失败\)/);
+  assert.doesNotMatch(driveComponentsSource, />指纹数 \(就绪\/失败\)</);
 });

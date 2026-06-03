@@ -141,7 +141,7 @@ export function DriveCardMetrics({ d }: { d: api.AdminDrive }) {
         </strong>
       </div>
       <div className="admin-drive-card__metric">
-        <span>指纹数 (就绪/失败)</span>
+        <span>视频指纹数 (就绪/失败)</span>
         <strong>
           {d.fingerprintReadyCount ?? 0}
           <span style={{ fontSize: "11px", fontWeight: "normal", color: "var(--text-faint)" }}>
@@ -174,6 +174,15 @@ export function DriveGenerationPanel({
   onRegenFailedThumbnails: () => void;
   onRegenFailedFingerprints: () => void;
 }) {
+  const canQueueThumbnails =
+    (d.thumbnailFailedCount ?? 0) > 0 ||
+    (d.thumbnailPendingCount ?? 0) > 0 ||
+    (d.thumbnailDurationPendingCount ?? 0) > 0;
+  const canQueuePreviews =
+    (d.teaserFailedCount ?? 0) > 0 || (d.teaserPendingCount ?? 0) > 0;
+  const canQueueFingerprints =
+    (d.fingerprintFailedCount ?? 0) > 0 || (d.fingerprintPendingCount ?? 0) > 0;
+
   return (
     <div className="admin-detail-card">
       <header className="admin-detail-card__title">
@@ -249,30 +258,27 @@ export function DriveGenerationPanel({
       <div className="admin-detail-actions">
         <button
           className="admin-btn"
-          disabled={(d.thumbnailFailedCount ?? 0) <= 0 || regenFailedThumbId === d.id}
+          disabled={!canQueueThumbnails || regenFailedThumbId === d.id}
           onClick={onRegenFailedThumbnails}
         >
           <RotateCcw size={13} />
-          <span>重试失败封面</span>
+          <span>{(d.thumbnailFailedCount ?? 0) > 0 ? "重试失败封面" : "继续生成封面"}</span>
         </button>
         <button
           className="admin-btn"
-          disabled={(d.teaserFailedCount ?? 0) <= 0 || regenFailedId === d.id}
+          disabled={!canQueuePreviews || regenFailedId === d.id}
           onClick={onRegenFailed}
         >
           <RotateCcw size={13} />
-          <span>重试失败预览视频</span>
+          <span>{(d.teaserFailedCount ?? 0) > 0 ? "重试失败预览视频" : "继续生成预览视频"}</span>
         </button>
         <button
           className="admin-btn"
-          disabled={
-            (d.fingerprintFailedCount ?? 0) <= 0 ||
-            regenFailedFingerprintId === d.id
-          }
+          disabled={!canQueueFingerprints || regenFailedFingerprintId === d.id}
           onClick={onRegenFailedFingerprints}
         >
           <RotateCcw size={13} />
-          <span>重试失败指纹</span>
+          <span>{(d.fingerprintFailedCount ?? 0) > 0 ? "重试失败指纹" : "继续生成指纹"}</span>
         </button>
       </div>
     </div>

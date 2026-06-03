@@ -176,6 +176,13 @@ export function rescan(id: string) {
   );
 }
 
+export function stopDriveTasks(id: string) {
+  return request<{ ok: boolean; stopped: boolean }>(
+    `/drives/${encodeURIComponent(id)}/tasks/stop`,
+    { method: "POST" }
+  );
+}
+
 export type P123QRSession = {
   loginUuid: string;
   uniID: string;
@@ -436,6 +443,13 @@ export function getNightlyJobStatus() {
 export function runNightlyJob() {
   return request<{ ok: boolean; accepted: boolean; status: NightlyJobStatus }>(
     "/jobs/nightly/run",
+    { method: "POST" }
+  );
+}
+
+export function stopAllTasks() {
+  return request<{ ok: boolean; stoppedDrives: number; status: NightlyJobStatus }>(
+    "/tasks/stop",
     { method: "POST" }
   );
 }

@@ -395,6 +395,61 @@ func TestStatusTracksQueuedRunningAndFinished(t *testing.T) {
 	}
 }
 
+func TestStopCurrentCancelsRunningPipeline(t *testing.T) {
+	scanStarted := make(chan struct{})
+	scanCanceled := make(chan struct{})
+	var startedOnce sync.Once
+	r := New(Config{
+		Settings: newStubSettings(),
+		ListScanTargets: func(context.Context) []string {
+			return []string{"drive"}
+		},
+		RunScan: func(ctx context.Context, _ string) {
+			startedOnce.Do(func() { close(scanStarted) })
+			<-ctx.Done()
+			close(scanCanceled)
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go r.Run(ctx)
+
+	if !r.TriggerNow() {
+		t.Fatal("TriggerNow should queue a manual run")
+	}
+	select {
+	case <-scanStarted:
+	case <-time.After(time.Second):
+		t.Fatal("pipeline did not start")
+	}
+
+	if !r.StopCurrent() {
+		t.Fatal("StopCurrent should report a running pipeline")
+	}
+	select {
+	case <-scanCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("StopCurrent did not cancel pipeline context")
+	}
+}
+
+func TestStopCurrentDropsQueuedTrigger(t *testing.T) {
+	r := New(Config{Settings: newStubSettings()})
+	if !r.TriggerNow() {
+		t.Fatal("TriggerNow should queue a manual run")
+	}
+	if !r.StopCurrent() {
+		t.Fatal("StopCurrent should report a queued pipeline")
+	}
+	if got := r.Status(); got.State != "idle" || got.Running || got.Queued {
+		t.Fatalf("status = %#v, want idle after dropping queued trigger", got)
+	}
+	if !r.TriggerNow() {
+		t.Fatal("TriggerNow should accept a new request after queued stop")
+	}
+}
+
 func TestTriggerNowAcceptsOnlyOneConcurrentRequest(t *testing.T) {
 	r := New(Config{Settings: newStubSettings()})
 
