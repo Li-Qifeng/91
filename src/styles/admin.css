@@ -624,8 +624,10 @@
   border-bottom: 0;
 }
 
-.admin-table tbody tr:hover td {
-  background: rgba(255, 255, 255, 0.025);
+@media (hover: hover) and (pointer: fine) {
+  .admin-table tbody tr:hover td {
+    background: rgba(255, 255, 255, 0.025);
+  }
 }
 
 .admin-table td.is-actions {
@@ -1398,12 +1400,14 @@
     transition: border-color var(--transition-fast), transform var(--transition-fast);
   }
 
-  .admin-table:not(.admin-drives-table) tr:hover {
-    border-color: var(--border-strong);
-  }
+  @media (hover: hover) and (pointer: fine) {
+    .admin-table:not(.admin-drives-table) tr:hover {
+      border-color: var(--border-strong);
+    }
 
-  .admin-table:not(.admin-drives-table) tr:hover td {
-    background: transparent;
+    .admin-table:not(.admin-drives-table) tr:hover td {
+      background: transparent;
+    }
   }
 
   .admin-table:not(.admin-drives-table) td {
@@ -1447,6 +1451,21 @@
 
   .admin-table:not(.admin-drives-table) td.is-actions .admin-btn + .admin-btn {
     margin-left: 0;
+  }
+
+  .admin-table.is-selectable:not(.admin-drives-table) tr,
+  .admin-table.is-selectable:not(.admin-drives-table) td,
+  .admin-table.is-selectable:not(.admin-drives-table) td::before,
+  .admin-table.is-selectable:not(.admin-drives-table) .admin-video-title,
+  .admin-table.is-selectable:not(.admin-drives-table) .admin-video-filemeta,
+  .admin-table.is-selectable:not(.admin-drives-table) .admin-pills,
+  .admin-table.is-selectable:not(.admin-drives-table) .admin-pill,
+  .admin-table.is-selectable:not(.admin-drives-table) .admin-status,
+  .admin-table.is-selectable:not(.admin-drives-table) .admin-mono-cell {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   .admin-modal-backdrop {
@@ -2637,5 +2656,7 @@
 .admin-thumbnail-img { max-width: 200px; max-height: 120px; object-fit: contain; border-radius: 4px; border: 1px solid var(--border-default); background: var(--bg-sunken); }
 .admin-table { overflow: visible !important; border-collapse: separate !important; border-spacing: 0 !important; }
 .admin-table th { position: sticky; top: 0; background: var(--bg-elevated) !important; z-index: 10; }
-.admin-table tbody tr:hover td { background: var(--bg-elevated) !important; }
+@media (hover: hover) and (pointer: fine) {
+  .admin-table tbody tr:hover td { background: var(--bg-elevated) !important; }
+}
 .admin-table tr.is-selected td { background: var(--accent-softer) !important; }
