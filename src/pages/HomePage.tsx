@@ -7,6 +7,7 @@ import { SectionHeader } from "@/components/SectionHeader";
 import { VideoGrid } from "@/components/VideoGrid";
 import { fetchHomeVideos, fetchListing } from "@/data/videos";
 import type { VideoItem } from "@/types";
+import { RefreshCw } from "lucide-react";
 
 const DESKTOP_COUNT = 12;
 const MOBILE_COUNT = 8;
@@ -104,6 +105,25 @@ export default function HomePage() {
   const ranking = rankingVideos.slice(0, displayCount);
   const latest = latestVideos.slice(0, displayCount);
 
+  async function refreshRandom() {
+    setRankingLoading(true);
+    const excludeIds = loadRecentHomeVideoIds();
+    try {
+      let items = await fetchHomeVideos(excludeIds);
+      if (!items.length) {
+        window.localStorage.removeItem(HOME_RECENT_KEY);
+        items = await fetchHomeVideos([]);
+      }
+      rememberHomeVideos(items);
+      cachedRanking = items;
+      setRankingVideos(items);
+    } catch {
+      // ignore
+    } finally {
+      setRankingLoading(false);
+    }
+  }
+
   return (
     <AppShell mobileAutoHideNav>
       <div className="container page-section">
@@ -113,7 +133,19 @@ export default function HomePage() {
       </div>
 
       <div className="container page-section">
-        <SectionHeader title="随机推荐" extra={`随机展示 ${ranking.length} 个作品`} />
+        <SectionHeader
+          title="随机推荐"
+          extra={
+            <button
+              className="admin-btn"
+              onClick={refreshRandom}
+              disabled={rankingLoading}
+              style={{ fontSize: 12, padding: "4px 10px" }}
+            >
+              <RefreshCw size={13} /> 换一批
+            </button>
+          }
+        />
         <VideoGrid
           videos={ranking}
           loading={rankingLoading}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -66,6 +67,8 @@ type CrawlerConfig struct {
 	OnNewVideo func(v *catalog.Video)
 	// ExtraArgs 是给 Python 脚本附加的额外 CLI 参数（如 --category, --ua-list）。
 	ExtraArgs []string
+	// UAList 是下载视频/封面时使用的 User-Agent 轮换列表；空列表时使用内置默认值。
+	UAList []string
 }
 
 // Crawler 把 Python 爬虫产出包装成 catalog 入库流程。
@@ -78,6 +81,14 @@ type Crawler struct {
 // SetExtraArgs 动态更新爬虫脚本的额外参数（在每次 RunOnce 前调用）。
 func (c *Crawler) SetExtraArgs(args []string) {
 	c.cfg.ExtraArgs = args
+}
+
+// pickUA 返回当前要使用的 User-Agent；配置了 UAList 时随机轮换，否则用默认值。
+func (c *Crawler) pickUA() string {
+	if len(c.cfg.UAList) > 0 {
+		return c.cfg.UAList[rand.Intn(len(c.cfg.UAList))]
+	}
+	return downloadUA
 }
 
 // NewCrawler 构造 Crawler。
@@ -647,7 +658,14 @@ func (c *Crawler) downloadVideoAtomicWithRefresh(ctx context.Context, item spide
 		size, err := c.downloadAtomic(attemptCtx, videoURL, dst, item.DetailURL)
 		cancel()
 		if err == nil {
-			return size, nil
+			// ffprobe 快速验证文件完整性（moov atom 是否存在）
+			if vErr := validateVideoFile(dst); vErr != nil {
+				_ = os.Remove(dst)
+				lastErr = vErr
+				// 继续循环尝试刷新 URL 重试
+			} else {
+				return size, nil
+			}
 		}
 		lastErr = err
 		if ctx.Err() != nil || !shouldRefreshSpider91VideoURL(err) {
@@ -699,7 +717,7 @@ func (c *Crawler) downloadAtomic(ctx context.Context, src, dst, referer string) 
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("User-Agent", downloadUA)
+	req.Header.Set("User-Agent", c.pickUA())
 	if referer != "" {
 		req.Header.Set("Referer", referer)
 	}
@@ -796,7 +814,7 @@ func (c *Crawler) resolveFreshVideoURL(ctx context.Context, item spiderVideoEntr
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", downloadUA)
+	req.Header.Set("User-Agent", c.pickUA())
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 	req.Header.Set("Cookie", cookieHeader)
@@ -824,7 +842,7 @@ func (c *Crawler) fetchSpider91WarmCookies(ctx context.Context, warmURL, referer
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", downloadUA)
+	req.Header.Set("User-Agent", c.pickUA())
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
 	req.Header.Set("Cookie", "mode=d")
@@ -1113,4 +1131,23 @@ func detectThumbExt(rawURL string) string {
 		return ext
 	}
 	return ".jpg"
+}
+
+// validateVideoFile 用 ffprobe 验证 MP4 文件是否有完整 moov atom。
+func validateVideoFile(path string) error {
+	cmd := exec.Command("ffprobe",
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		path,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("video integrity check failed: %s", strings.TrimSpace(string(out)))
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" || raw == "N/A" {
+		return errors.New("video integrity check failed: no duration")
+	}
+	return nil
 }

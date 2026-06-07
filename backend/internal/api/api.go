@@ -136,6 +136,7 @@ func (s *Server) RegisterRoutes(r chi.Router, a *auth.Authenticator) {
 		r.Get("/api/home", s.handleHome)
 		r.Get("/api/list", s.handleList)
 		r.Get("/api/video/{id}", s.handleVideoDetail)
+		r.Get("/api/video/{id}/related", s.handleVideoRelated)
 		r.Put("/api/video/{id}/tags", s.handleUpdateVideoTags)
 		r.Post("/api/video/{id}/like", s.handleLike)
 		r.Delete("/api/video/{id}/like", s.handleUnlike)
@@ -356,6 +357,22 @@ func (s *Server) handleVideoDetail(w http.ResponseWriter, r *http.Request) {
 	// 推荐每次随机生成，禁止浏览器和中间层缓存详情响应
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) handleVideoRelated(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	v, err := s.Catalog.GetVideo(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	if v.Hidden {
+		writeErr(w, http.StatusNotFound, sql.ErrNoRows)
+		return
+	}
+	related := s.pickRelatedVideos(r.Context(), v, 6)
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, mapVideos(related))
 }
 
 // pickRelatedVideos 选 total 个推荐视频。
