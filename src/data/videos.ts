@@ -41,6 +41,12 @@ export function fetchRelatedVideos(id: string): Promise<VideoItem[]> {
   );
 }
 
+export function fetchCategories(): Promise<{ category: string; count: number }[]> {
+  return apiGet<{ category: string; count: number }[]>("/api/categories").catch(
+    () => []
+  );
+}
+
 export function updateVideoTags(
   id: string,
   tags: string[]

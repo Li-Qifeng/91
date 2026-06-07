@@ -5,12 +5,13 @@ import { SearchPanel } from "@/components/SearchPanel";
 import { TagCloud } from "@/components/TagCloud";
 import { SectionHeader } from "@/components/SectionHeader";
 import { VideoGrid } from "@/components/VideoGrid";
-import { fetchHomeVideos, fetchListing } from "@/data/videos";
+import { fetchHomeVideos, fetchListing, fetchCategories } from "@/data/videos";
 import type { VideoItem } from "@/types";
 import { RefreshCw } from "lucide-react";
 
 const DESKTOP_COUNT = 12;
 const MOBILE_COUNT = 8;
+const CATEGORY_COUNT = 6;
 const HOME_RECENT_KEY = "home.random.recentVideoIds";
 const HOME_RECENT_LIMIT = 72;
 
@@ -58,11 +59,19 @@ function rememberHomeVideos(items: VideoItem[]) {
   }
 }
 
+type CategorySection = {
+  category: string;
+  videos: VideoItem[];
+  loading: boolean;
+};
+
 export default function HomePage() {
   const [rankingVideos, setRankingVideos] = useState<VideoItem[]>(cachedRanking ?? []);
   const [latestVideos, setLatestVideos] = useState<VideoItem[]>(cachedLatest ?? []);
   const [rankingLoading, setRankingLoading] = useState(cachedRanking === null);
   const [latestLoading, setLatestLoading] = useState(cachedLatest === null);
+  const [categories, setCategories] = useState<CategorySection[]>([]);
+  const [catsLoading, setCatsLoading] = useState(true);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -97,6 +106,44 @@ export default function HomePage() {
           if (active) setLatestLoading(false);
         });
     }
+
+    // 加载分类区块
+    setCatsLoading(true);
+    fetchCategories().then((catList) => {
+      if (!active) return;
+      const sections: CategorySection[] = catList
+        .filter((c) => c.category && c.count > 0)
+        .slice(0, 6)
+        .map((c) => ({ category: c.category, videos: [], loading: true }));
+      setCategories(sections);
+
+      // 逐个加载分类视频
+      sections.forEach((sec, idx) => {
+        fetchListing(1, CATEGORY_COUNT, { cat: sec.category, sort: "latest", includeTotal: false })
+          .then((res) => {
+            if (!active) return;
+            setCategories((prev) => {
+              const next = [...prev];
+              if (next[idx]) {
+                next[idx] = { ...next[idx], videos: res.items, loading: false };
+              }
+              return next;
+            });
+          })
+          .catch(() => {
+            if (!active) return;
+            setCategories((prev) => {
+              const next = [...prev];
+              if (next[idx]) {
+                next[idx] = { ...next[idx], loading: false };
+              }
+              return next;
+            });
+          });
+      });
+    }).finally(() => {
+      if (active) setCatsLoading(false);
+    });
 
     return () => { active = false; };
   }, []);
@@ -158,6 +205,24 @@ export default function HomePage() {
         <SectionHeader title="最新视频" extra={latest.length > 0 ? `共 ${latest.length} 个` : undefined} />
         <VideoGrid videos={latest} loading={latestLoading} skeletonCount={displayCount} />
       </div>
+
+      {categories.map((sec) => (
+        <div key={sec.category} className="container page-section">
+          <SectionHeader
+            title={sec.category}
+            extra={
+              <a href={`/list?cat=${encodeURIComponent(sec.category)}`} style={{ fontSize: 12, color: "var(--accent)" }}>
+                查看更多 →
+              </a>
+            }
+          />
+          <VideoGrid
+            videos={sec.videos}
+            loading={sec.loading}
+            skeletonCount={CATEGORY_COUNT}
+          />
+        </div>
+      ))}
     </AppShell>
   );
 }

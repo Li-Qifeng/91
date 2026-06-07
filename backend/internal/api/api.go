@@ -144,6 +144,7 @@ func (s *Server) RegisterRoutes(r chi.Router, a *auth.Authenticator) {
 		r.Post("/api/video/{id}/hide", s.handleHideVideo)
 		r.Post("/api/upload", s.handleUploadVideo)
 		r.Get("/api/tags", s.handleTags)
+		r.Get("/api/categories", s.handleCategories)
 		r.Post("/api/shorts/next", s.handleShortsNext)
 
 		// 代理路由同样需要鉴权，防止绕过
@@ -538,6 +539,19 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 	s.tagCacheMu.Unlock()
 
 	w.Header().Set("Cache-Control", "private, max-age=15")
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleCategories(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.Catalog.ListCategories(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]map[string]any, 0, len(stats))
+	for _, stat := range stats {
+		out = append(out, map[string]any{"category": stat.Category, "count": stat.Count})
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
