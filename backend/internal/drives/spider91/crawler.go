@@ -64,6 +64,8 @@ type CrawlerConfig struct {
 
 	// OnNewVideo 是新视频成功入库后的回调，用于触发预览视频 worker。
 	OnNewVideo func(v *catalog.Video)
+	// ExtraArgs 是给 Python 脚本附加的额外 CLI 参数（如 --category, --ua-list）。
+	ExtraArgs []string
 }
 
 // Crawler 把 Python 爬虫产出包装成 catalog 入库流程。
@@ -71,6 +73,11 @@ type Crawler struct {
 	cfg CrawlerConfig
 	// runMu 保证同一个 Crawler 实例不会并发跑两次。
 	runMu sync.Mutex
+}
+
+// SetExtraArgs 动态更新爬虫脚本的额外参数（在每次 RunOnce 前调用）。
+func (c *Crawler) SetExtraArgs(args []string) {
+	c.cfg.ExtraArgs = args
 }
 
 // NewCrawler 构造 Crawler。
@@ -432,6 +439,10 @@ func (c *Crawler) startSpiderTargetNew(ctx context.Context, targetNew int, seenP
 		"--no-resume",
 		"--quiet",
 		"--stream-output",
+		"--extract-meta",
+	}
+	if len(c.cfg.ExtraArgs) > 0 {
+		args = append(args, c.cfg.ExtraArgs...)
 	}
 	// 子进程的 ctx 走外层 ctx 即可，不再额外加 SpiderTimeout —— 流式模式下
 	// 单个视频的下载在 Go 端做超时控制（DownloadTimeout）；爬虫脚本主要时间在

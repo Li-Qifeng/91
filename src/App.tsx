@@ -11,6 +11,7 @@ import { DrivesPage } from "@/admin/DrivesPage";
 import { VideosPage } from "@/admin/VideosPage";
 import { TagsPage } from "@/admin/TagsPage";
 import { ThemePage } from "@/admin/ThemePage";
+import { Spider91Page } from "@/admin/Spider91Page";
 
 export default function App() {
   return (
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="videos" element={<VideosPage />} />
         <Route path="tags" element={<TagsPage />} />
         <Route path="theme" element={<ThemePage />} />
+        <Route path="spider91" element={<Spider91Page />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

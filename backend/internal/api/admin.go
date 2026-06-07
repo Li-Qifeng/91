@@ -1122,8 +1122,11 @@ func (a *AdminServer) handleRegenFailedFingerprints(w http.ResponseWriter, r *ht
 // 不再出现在这里；前端要切换某个盘的预览视频生成请用 POST /admin/api/drives 上传
 // teaserEnabled 字段。保留 settings 用作主题、spider91 上传目标这类全局配置。
 type settingsDTO struct {
-	Theme                 string `json:"theme"`
-	Spider91UploadDriveID string `json:"spider91UploadDriveId"`
+	Theme                 string          `json:"theme"`
+	Spider91UploadDriveID string          `json:"spider91UploadDriveId"`
+	Spider91TargetNew     int             `json:"spider91TargetNew"`
+	Spider91Config        json.RawMessage `json:"spider91Config,omitempty"`
+	Spider91WorkDir       string          `json:"spider91WorkDir"`
 }
 
 func (a *AdminServer) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -1137,10 +1140,27 @@ func (a *AdminServer) handleGetSettings(w http.ResponseWriter, r *http.Request) 
 	if a.GetSpider91UploadDriveID != nil {
 		spider91UploadID = a.GetSpider91UploadDriveID()
 	}
-	writeJSON(w, http.StatusOK, settingsDTO{
+	resp := settingsDTO{
 		Theme:                 theme,
 		Spider91UploadDriveID: spider91UploadID,
-	})
+		Spider91TargetNew:     15,
+		Spider91WorkDir:       "",
+	}
+	// 从 catalog settings 读取 spider91 配置
+	if a.Catalog != nil {
+		if v, err := a.Catalog.GetSetting(r.Context(), "spider91.target_new", "15"); err == nil {
+			if n, _ := strconv.Atoi(v); n > 0 {
+				resp.Spider91TargetNew = n
+			}
+		}
+		if v, err := a.Catalog.GetSetting(r.Context(), "spider91.config", "{}"); err == nil && v != "" && v != "{}" {
+			resp.Spider91Config = json.RawMessage(v)
+		}
+		if v, err := a.Catalog.GetSetting(r.Context(), "spider91.workdir", ""); err == nil {
+			resp.Spider91WorkDir = v
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (a *AdminServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {
@@ -1178,6 +1198,24 @@ func (a *AdminServer) handlePutSettings(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	if a.Catalog != nil {
+		if v, ok := raw["spider91TargetNew"]; ok {
+			var n int
+			if err := json.Unmarshal(v, &n); err == nil && n > 0 {
+				_ = a.Catalog.SetSetting(r.Context(), "spider91.target_new", fmt.Sprintf("%d", n))
+			}
+		}
+		if v, ok := raw["spider91Config"]; ok {
+			_ = a.Catalog.SetSetting(r.Context(), "spider91.config", string(v))
+		}
+		if v, ok := raw["spider91WorkDir"]; ok {
+			var wd string
+			if err := json.Unmarshal(v, &wd); err == nil {
+				_ = a.Catalog.SetSetting(r.Context(), "spider91.workdir", wd)
+			}
+		}
+	}
+
 	// 回显当前值
 	resp := settingsDTO{}
 	if a.GetTheme != nil {
@@ -1185,6 +1223,19 @@ func (a *AdminServer) handlePutSettings(w http.ResponseWriter, r *http.Request) 
 	}
 	if a.GetSpider91UploadDriveID != nil {
 		resp.Spider91UploadDriveID = a.GetSpider91UploadDriveID()
+	}
+	if a.Catalog != nil {
+		if v, err := a.Catalog.GetSetting(r.Context(), "spider91.target_new", "15"); err == nil {
+			if n, _ := strconv.Atoi(v); n > 0 {
+				resp.Spider91TargetNew = n
+			}
+		}
+		if v, err := a.Catalog.GetSetting(r.Context(), "spider91.config", "{}"); err == nil && v != "" && v != "{}" {
+			resp.Spider91Config = json.RawMessage(v)
+		}
+		if v, err := a.Catalog.GetSetting(r.Context(), "spider91.workdir", ""); err == nil {
+			resp.Spider91WorkDir = v
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

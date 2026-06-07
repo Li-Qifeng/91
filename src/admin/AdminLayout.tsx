@@ -10,6 +10,7 @@ import {
   Palette,
   RefreshCw,
   MoreVertical,
+  Globe,
 } from "lucide-react";
 import * as api from "./api";
 import { useAuth } from "./AuthContext";
@@ -111,6 +112,14 @@ export function AdminLayout() {
             }
           >
             <Palette size={16} /> 主题外观
+          </NavLink>
+          <NavLink
+            to="/admin/spider91"
+            className={({ isActive }) =>
+              `admin-nav__link ${isActive ? "is-active" : ""}`
+            }
+          >
+            <Globe size={16} /> 爬虫设置
           </NavLink>
         </nav>
         <div className="admin-sidebar__footer">

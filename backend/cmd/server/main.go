@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -488,6 +489,61 @@ func (a *App) loadSpider91UploadDriveID(ctx context.Context) {
 	a.mu.Lock()
 	a.spider91UploadDriveID = strings.TrimSpace(v)
 	a.mu.Unlock()
+}
+
+// spider91ExtraArgs 从 catalog settings 中读取全局 spider91 配置并转为 CLI 参数。
+func (a *App) spider91ExtraArgs(ctx context.Context) []string {
+	cfgJSON, err := a.cat.GetSetting(ctx, "spider91.config", "")
+	if err != nil || cfgJSON == "" || cfgJSON == "{}" {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(cfgJSON), &m); err != nil {
+		log.Printf("[spider91] parse config json: %v", err)
+		return nil
+	}
+	var args []string
+	add := func(key string, flag string) {
+		if v, ok := m[key]; ok && v != nil && v != "" {
+			switch val := v.(type) {
+			case string:
+				if val != "" {
+					args = append(args, flag, val)
+				}
+			case float64:
+				args = append(args, flag, fmt.Sprintf("%.0f", val))
+			case bool:
+				if val {
+					args = append(args, flag)
+				}
+			case []any:
+				if len(val) > 0 {
+					parts := make([]string, 0, len(val))
+					for _, item := range val {
+						if s, ok := item.(string); ok && s != "" {
+							parts = append(parts, s)
+						}
+					}
+					if len(parts) > 0 {
+						args = append(args, flag, strings.Join(parts, ","))
+					}
+				}
+			}
+		}
+	}
+	add("category", "--category")
+	add("viewtype", "--viewtype")
+	add("ua_list", "--ua-list")
+	add("user_agent", "--user-agent")
+	add("min_page_delay", "--min-page-delay")
+	add("max_page_delay", "--max-page-delay")
+	add("min_detail_delay", "--min-detail-delay")
+	add("max_detail_delay", "--max-detail-delay")
+	add("max_retries", "--max-retries")
+	add("retry_delay", "--retry-delay")
+	add("request_timeout", "--request-timeout")
+	add("extract_meta", "--extract-meta")
+	return args
 }
 
 func (a *App) driveGenerationStatuses() map[string]api.DriveGenerationStatuses {
@@ -2374,7 +2430,20 @@ func (a *App) runSpider91CrawlWithTaskContext(ctx context.Context, driveID strin
 		log.Printf("[spider91] drive=%s lookup failed: %v", driveID, err)
 		return
 	}
-	targetNew := spider91IntCred(d, "target_new", spider91.DefaultTargetNew)
+
+	// 全局 spider91 配置 → ExtraArgs
+	extraArgs := a.spider91ExtraArgs(ctx)
+	c.SetExtraArgs(extraArgs)
+
+	targetNew := spider91IntCred(d, "target_new", 0)
+	if targetNew <= 0 {
+		// 回退到全局 setting
+		if v, err := a.cat.GetSetting(ctx, "spider91.target_new", ""); err == nil {
+			if n, _ := strconv.Atoi(v); n > 0 {
+				targetNew = n
+			}
+		}
+	}
 	if targetNew <= 0 {
 		targetNew = spider91.DefaultTargetNew
 	}

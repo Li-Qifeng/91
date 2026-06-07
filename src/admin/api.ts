@@ -407,6 +407,24 @@ export type Settings = {
    * - 非空：显式指定。后端会校验 drive 存在且 kind ∈ {pikpak, p115, p123, onedrive}。
    */
   spider91UploadDriveId: string;
+  spider91TargetNew: number;
+  spider91Config?: Spider91Config;
+  spider91WorkDir: string;
+};
+
+export type Spider91Config = {
+  category?: string;
+  viewtype?: string;
+  ua_list?: string[];
+  user_agent?: string;
+  min_page_delay?: number;
+  max_page_delay?: number;
+  min_detail_delay?: number;
+  max_detail_delay?: number;
+  max_retries?: number;
+  retry_delay?: number;
+  request_timeout?: number;
+  extract_meta?: boolean;
 };
 
 export function getSettings() {
@@ -415,9 +433,6 @@ export function getSettings() {
 
 /**
  * 更新设置。后端按字段存在与否判断是否变更，所以可以传 Partial 局部更新。
- *
- * 例：只切换主题，其它字段保持原状：
- *   updateSettings({ theme: "pink" })
  */
 export function updateSettings(body: Partial<Settings>) {
   return request<Settings>("/settings", {
