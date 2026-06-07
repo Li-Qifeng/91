@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link } from "react-router-dom";
+import { RefreshCw } from "lucide-react";
 import type { PreviewState, VideoItem } from "@/types";
 import { formatCount } from "@/lib/format";
 import { previewController } from "@/lib/previewController";
@@ -12,6 +13,8 @@ import { PreviewVideo } from "./PreviewVideo";
 
 type Props = {
   videos: VideoItem[];
+  onRefresh?: () => void;
+  refreshing?: boolean;
 };
 
 const HOVER_DELAY_MS = 300;
@@ -32,7 +35,7 @@ function useActivePreviewId(): string | null {
  * （previewController / previewIntent / useInViewport / PreviewVideo），
  * 行为与 VideoCard 一致：桌面 hover 300ms 后预览，手机首次点击播预览、再点跳详情。
  */
-export function RecommendedRail({ videos }: Props) {
+export function RecommendedRail({ videos, onRefresh, refreshing }: Props) {
   if (!videos || videos.length === 0) return null;
 
   return (
@@ -43,6 +46,18 @@ export function RecommendedRail({ videos }: Props) {
           <span />
         </span>
         <h2 className="vd-rail__head-title">推荐视频</h2>
+        {onRefresh && (
+          <button
+            type="button"
+            className="vd-rail__refresh"
+            onClick={onRefresh}
+            disabled={refreshing}
+            title="换一批"
+            aria-label="换一批推荐视频"
+          >
+            <RefreshCw size={14} className={refreshing ? "admin-spin" : ""} />
+          </button>
+        )}
       </header>
       <ul className="vd-rail__list">
         {videos.map((v) => (

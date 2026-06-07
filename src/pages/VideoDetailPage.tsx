@@ -9,11 +9,13 @@ import { RecommendedRail } from "@/components/RecommendedRail";
 import {
   fetchTags,
   fetchVideoDetail,
+  fetchRelatedVideos,
   hideVideo,
   recordView,
   updateVideoTags,
 } from "@/data/videos";
-import type { TagItem, VideoDetail } from "@/types";
+import type { TagItem, VideoDetail, VideoItem } from "@/types";
+import { RefreshCw } from "lucide-react";
 
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +25,8 @@ export default function VideoDetailPage() {
   const [loading, setLoading] = useState(true);
   const [tagSaving, setTagSaving] = useState(false);
   const [hideSaving, setHideSaving] = useState(false);
+  const [relatedVideos, setRelatedVideos] = useState<VideoItem[]>([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
   const detailTopRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -33,6 +37,7 @@ export default function VideoDetailPage() {
     Promise.all([fetchVideoDetail(id), fetchTags()]).then(([d, tagList]) => {
       if (!active) return;
       setDetail(d);
+      setRelatedVideos(d?.relatedVideos ?? []);
       setTags(tagList);
       setLoading(false);
       document.title = d ? `${d.title} · 91` : "视频不存在";
@@ -80,6 +85,17 @@ export default function VideoDetailPage() {
     if (!detail) return;
     // 失败静默忽略，不打扰用户播放体验
     recordView(detail.id).catch(() => undefined);
+  }
+
+  async function refreshRelated() {
+    if (!id || relatedLoading) return;
+    setRelatedLoading(true);
+    try {
+      const items = await fetchRelatedVideos(id);
+      setRelatedVideos(items);
+    } finally {
+      setRelatedLoading(false);
+    }
   }
 
   if (loading) {
@@ -211,7 +227,11 @@ export default function VideoDetailPage() {
               />
             </div>
 
-            <RecommendedRail videos={detail.relatedVideos} />
+            <RecommendedRail
+              videos={relatedVideos}
+              onRefresh={refreshRelated}
+              refreshing={relatedLoading}
+            />
           </div>
         </div>
       </div>

@@ -35,6 +35,12 @@ export function fetchVideoDetail(id: string): Promise<VideoDetail | null> {
   );
 }
 
+export function fetchRelatedVideos(id: string): Promise<VideoItem[]> {
+  return apiGet<VideoItem[]>(`/api/video/${encodeURIComponent(id)}/related`).catch(
+    () => []
+  );
+}
+
 export function updateVideoTags(
   id: string,
   tags: string[]
