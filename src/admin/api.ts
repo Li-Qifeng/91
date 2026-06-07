@@ -324,12 +324,13 @@ export type AdminVideoList = {
   size: number;
 };
 
-export function listVideos(params: { driveId?: string; page?: number; size?: number; keyword?: string } = {}) {
+export function listVideos(params: { driveId?: string; page?: number; size?: number; keyword?: string; sort?: string } = {}) {
   const qs = new URLSearchParams();
   if (params.driveId) qs.set("driveId", params.driveId);
   if (params.page) qs.set("page", String(params.page));
   if (params.size) qs.set("size", String(params.size));
   if (params.keyword) qs.set("keyword", params.keyword);
+  if (params.sort) qs.set("sort", params.sort);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return request<AdminVideoList>(`/videos${suffix}`);
 }
@@ -474,4 +475,34 @@ export function stopAllTasks() {
     "/tasks/stop",
     { method: "POST" }
   );
+}
+
+// ---------- Spider91 Status ----------
+
+export type CrawlJobStatus = {
+  state: "idle" | "running" | "done" | "error";
+  driveId: string;
+  targetNew: number;
+  progress: number;
+  newVideos: number;
+  skipped: number;
+  failed: number;
+  startedAt?: string;
+  finishedAt?: string;
+  error?: string;
+};
+
+export type HistoryRecord = CrawlJobStatus & {
+  outputJson: string;
+  seenFile: string;
+};
+
+export type Spider91StatusResponse = {
+  status: CrawlJobStatus;
+  history: HistoryRecord[];
+};
+
+export function getSpider91Status(driveId?: string) {
+  const qs = driveId ? `?driveId=${encodeURIComponent(driveId)}` : "";
+  return request<Spider91StatusResponse>(`/jobs/spider91/status${qs}`);
 }

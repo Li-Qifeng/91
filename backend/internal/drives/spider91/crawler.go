@@ -76,6 +76,9 @@ type Crawler struct {
 	cfg CrawlerConfig
 	// runMu 保证同一个 Crawler 实例不会并发跑两次。
 	runMu sync.Mutex
+	// status 记录最近一次 RunOnce 的实时快照（用于前端状态面板）。
+	status   CrawlJobStatus
+	statusMu sync.RWMutex
 }
 
 // SetExtraArgs 动态更新爬虫脚本的额外参数（在每次 RunOnce 前调用）。
@@ -237,6 +240,118 @@ type CrawlResult struct {
 	SeenFile     string
 }
 
+// CrawlJobStatus 是 Crawler 当前运行状态的实时快照。
+type CrawlJobStatus struct {
+	// State: idle | running | done | error
+	State string `json:"state"`
+	// DriveID 便于前端识别归属。
+	DriveID string `json:"driveId"`
+	// TargetNew 本次目标新增数。
+	TargetNew int `json:"targetNew"`
+	// Progress 已处理条目数（TotalEntries 计数器快照）。
+	Progress int `json:"progress"`
+	// NewVideos 已成功入库数。
+	NewVideos int `json:"newVideos"`
+	// Skipped 已存在跳过的数量。
+	Skipped int `json:"skipped"`
+	// Failed 下载/入库失败的数量。
+	Failed int `json:"failed"`
+	// StartedAt / FinishedAt ISO8601 格式，便于前端直接展示。
+	StartedAt  string `json:"startedAt,omitempty"`
+	FinishedAt string `json:"finishedAt,omitempty"`
+	// Error 仅 state=error 时有值。
+	Error string `json:"error,omitempty"`
+}
+
+// HistoryRecord 是一条已完成的爬虫任务归档记录。
+type HistoryRecord struct {
+	CrawlJobStatus
+	// OutputJSON 本次产出的完整 JSON 路径。
+	OutputJSON string `json:"outputJson"`
+	// SeenFile 本次使用的已知视频 ID 列表路径。
+	SeenFile string `json:"seenFile"`
+}
+
+// Status 返回当前爬虫状态的只读副本。
+func (c *Crawler) Status() CrawlJobStatus {
+	c.statusMu.RLock()
+	defer c.statusMu.RUnlock()
+	return c.status
+}
+
+// historyPath 返回历史日志文件路径（<rootDir>/.crawl/history.jsonl）。
+func (c *Crawler) historyPath() string {
+	if c.cfg.Driver == nil {
+		return ""
+	}
+	rootDir, _ := filepath.Abs(c.cfg.Driver.RootDir())
+	if rootDir == "" {
+		return ""
+	}
+	return filepath.Join(rootDir, ".crawl", "history.jsonl")
+}
+
+// appendHistory 把一条记录追加到 history.jsonl。
+func (c *Crawler) appendHistory(rec HistoryRecord) error {
+	path := c.historyPath()
+	if path == "" {
+		return nil
+	}
+	crawlDir := filepath.Dir(path)
+	if err := os.MkdirAll(crawlDir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(f, string(b))
+	return err
+}
+
+// History 读取最近 topN 条历史记录（按时间倒序）。
+func (c *Crawler) History(topN int) ([]HistoryRecord, error) {
+	if topN <= 0 {
+		topN = 20
+	}
+	path := c.historyPath()
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	var recs []HistoryRecord
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		var rec HistoryRecord
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			continue
+		}
+		recs = append(recs, rec)
+	}
+	// 倒序：最新在前
+	for i, j := 0, len(recs)-1; i < j; i, j = i+1, j-1 {
+		recs[i], recs[j] = recs[j], recs[i]
+	}
+	if len(recs) > topN {
+		recs = recs[:topN]
+	}
+	return recs, scanner.Err()
+}
+
 // spiderVideoEntry 对应 spider_91porn.py 输出 JSON 中的单条视频。
 type spiderVideoEntry struct {
 	Title       string   `json:"title"`
@@ -294,6 +409,46 @@ func (c *Crawler) RunOnce(ctx context.Context, targetNew int) (*CrawlResult, err
 	result := &CrawlResult{TargetNew: targetNew, StartedAt: time.Now()}
 	defer func() { result.FinishedAt = time.Now() }()
 
+	// 初始化实时状态
+	driveID := c.cfg.Driver.ID()
+	c.statusMu.Lock()
+	c.status = CrawlJobStatus{
+		State:     "running",
+		DriveID:   driveID,
+		TargetNew: targetNew,
+		StartedAt: result.StartedAt.Format(time.RFC3339),
+	}
+	c.statusMu.Unlock()
+
+	// 状态归档 helper：在 defer 中把最终结果写入 history.jsonl
+	defer func() {
+		state := "done"
+		if runErr := recover(); runErr != nil {
+			state = "error"
+			// re-panic 保持原有行为
+			panic(runErr)
+		}
+		// 若 result 中有明显错误特征（Failed == TotalEntries 且 NewVideos == 0 且 TotalEntries > 0），
+		// 这里仍标 done，因为 RunOnce 返回的 error 才是更准确的信号。
+		c.statusMu.Lock()
+		c.status.State = state
+		c.status.FinishedAt = result.FinishedAt.Format(time.RFC3339)
+		c.status.Progress = result.TotalEntries
+		c.status.NewVideos = result.NewVideos
+		c.status.Skipped = result.Skipped
+		c.status.Failed = result.Failed
+		c.statusMu.Unlock()
+
+		rec := HistoryRecord{
+			CrawlJobStatus: c.status,
+			OutputJSON:     result.OutputJSON,
+			SeenFile:       result.SeenFile,
+		}
+		if err := c.appendHistory(rec); err != nil {
+			log.Printf("[spider91] drive=%s append history: %v", driveID, err)
+		}
+	}()
+
 	// 1. 准备 .crawl/ 目录 + 已知源视频 ID 列表
 	//
 	// 关键：路径必须用绝对路径，因为 Python 子进程的 cwd 我们设成了脚本所在目录
@@ -328,6 +483,10 @@ func (c *Crawler) RunOnce(ctx context.Context, targetNew int) (*CrawlResult, err
 	// 不会因为 Go 在下前面 7 个时让后面 8 个的签名超时。
 	cmd, stdout, err := c.startSpiderTargetNew(ctx, targetNew, seenPath, outputPath)
 	if err != nil {
+		c.statusMu.Lock()
+		c.status.State = "error"
+		c.status.Error = err.Error()
+		c.statusMu.Unlock()
 		return result, fmt.Errorf("spider91 crawler: spider start: %w", err)
 	}
 
@@ -348,6 +507,15 @@ func (c *Crawler) RunOnce(ctx context.Context, targetNew int) (*CrawlResult, err
 			continue
 		}
 		result.TotalEntries++
+
+		// 实时更新进度
+		c.statusMu.Lock()
+		c.status.Progress = result.TotalEntries
+		c.status.NewVideos = result.NewVideos
+		c.status.Skipped = result.Skipped
+		c.status.Failed = result.Failed
+		c.statusMu.Unlock()
+
 		sourceID := sourceIDForItem(item)
 		if sourceID == "" || strings.TrimSpace(item.VideoURL) == "" {
 			result.Failed++

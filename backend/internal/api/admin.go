@@ -19,6 +19,7 @@ import (
 	"github.com/video-site/backend/internal/auth"
 	"github.com/video-site/backend/internal/catalog"
 	"github.com/video-site/backend/internal/drives/p123"
+	"github.com/video-site/backend/internal/drives/spider91"
 )
 
 type AdminServer struct {
@@ -71,6 +72,9 @@ type AdminServer struct {
 	OnRunNightlyJob func() bool
 	// GetNightlyJobStatus 返回凌晨流水线当前状态，用于前端禁用重复触发按钮。
 	GetNightlyJobStatus func() NightlyJobStatus
+	// GetSpider91Status 返回 spider91 当前运行状态及最近历史记录。
+	// driveID 为空时返回第一个可用的 spider91 drive 状态。
+	GetSpider91Status func(driveID string) (*spider91.CrawlJobStatus, []spider91.HistoryRecord, error)
 	// ListDriveDirChildren 列出某个 drive 在 parentID 目录下的直接子目录。
 	// parentID 为空时使用 drive 的 RootID。返回 (子目录列表, error)。
 	// 用于"设置跳过目录"弹窗按需展开浏览网盘目录树；只返回目录条目，文件忽略。
@@ -162,6 +166,7 @@ func (a *AdminServer) Register(r chi.Router) {
 			r.Get("/update/check", a.handleCheckUpdate)
 			r.Get("/jobs/nightly/status", a.handleNightlyJobStatus)
 			r.Post("/jobs/nightly/run", a.handleRunNightlyJob)
+			r.Get("/jobs/spider91/status", a.handleSpider91Status)
 			r.Post("/tasks/stop", a.handleStopAllTasks)
 		})
 	})
@@ -901,6 +906,7 @@ func (a *AdminServer) handleAdminListVideos(w http.ResponseWriter, r *http.Reque
 	items, total, err := a.Catalog.ListVideos(r.Context(), catalog.ListParams{
 		Keyword:  q.Get("keyword"),
 		DriveID:  q.Get("driveId"),
+		Sort:     q.Get("sort"),
 		Page:     page,
 		PageSize: size,
 	})
@@ -1161,6 +1167,35 @@ func (a *AdminServer) handleGetSettings(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// spider91StatusDTO 是 GET /admin/api/jobs/spider91/status 的响应结构。
+type spider91StatusDTO struct {
+	Status  spider91.CrawlJobStatus   `json:"status"`
+	History []spider91.HistoryRecord  `json:"history"`
+}
+
+func (a *AdminServer) handleSpider91Status(w http.ResponseWriter, r *http.Request) {
+	if a.GetSpider91Status == nil {
+		writeJSON(w, http.StatusOK, spider91StatusDTO{
+			Status: spider91.CrawlJobStatus{State: "idle"},
+		})
+		return
+	}
+
+	driveID := r.URL.Query().Get("driveId")
+	status, history, err := a.GetSpider91Status(driveID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if status == nil {
+		status = &spider91.CrawlJobStatus{State: "idle"}
+	}
+	writeJSON(w, http.StatusOK, spider91StatusDTO{
+		Status:  *status,
+		History: history,
+	})
 }
 
 func (a *AdminServer) handlePutSettings(w http.ResponseWriter, r *http.Request) {

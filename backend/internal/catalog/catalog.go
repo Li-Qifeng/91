@@ -1048,6 +1048,16 @@ func (c *Catalog) ListVideos(ctx context.Context, p ListParams) ([]*Video, int, 
 		orderBy = " ORDER BY " + readyOrderPrefix + "likes DESC"
 	case "long":
 		orderBy = " ORDER BY " + readyOrderPrefix + "duration_seconds DESC"
+	case "views":
+		orderBy = " ORDER BY " + readyOrderPrefix + "views DESC, published_at DESC"
+	case "likes":
+		orderBy = " ORDER BY " + readyOrderPrefix + "likes DESC, published_at DESC"
+	case "favorites":
+		orderBy = " ORDER BY " + readyOrderPrefix + "favorites DESC, published_at DESC"
+	case "title":
+		orderBy = " ORDER BY " + readyOrderPrefix + "title COLLATE NOCASE ASC"
+	case "size":
+		orderBy = " ORDER BY " + readyOrderPrefix + "size_bytes DESC"
 	}
 
 	var total int

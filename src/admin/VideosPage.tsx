@@ -18,6 +18,7 @@ export function VideosPage() {
   const [keyword, setKeyword] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [driveId, setDriveId] = useState("");
+  const [sort, setSort] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [editing, setEditing] = useState<api.AdminVideo | null>(null);
@@ -37,7 +38,7 @@ export function VideosPage() {
     setLoadError("");
     try {
       const [r, tagList, driveList] = await Promise.all([
-        api.listVideos({ driveId, page, size: pageSize, keyword: searchKeyword }),
+        api.listVideos({ driveId, page, size: pageSize, keyword: searchKeyword, sort }),
         api.listTags(),
         api.listDrives(),
       ]);
@@ -57,7 +58,7 @@ export function VideosPage() {
 
   useEffect(() => {
     refresh();
-  }, [driveId, page, searchKeyword, pageSize]);
+  }, [driveId, page, searchKeyword, pageSize, sort]);
 
   useEffect(() => {
     setPage(1);
@@ -239,6 +240,26 @@ export function VideosPage() {
           <button type="button" className="admin-btn" onClick={refresh}>
             <RefreshCw size={13} /> 刷新
           </button>
+          <div className="admin-videos-filter__select-wrap">
+            <select
+              className="admin-videos-filter__select"
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">默认排序</option>
+              <option value="latest">最新发布</option>
+              <option value="views">最多观看</option>
+              <option value="likes">最多点赞</option>
+              <option value="favorites">最多收藏</option>
+              <option value="long">最长时长</option>
+              <option value="title">标题正序</option>
+              <option value="size">最大体积</option>
+            </select>
+            <ChevronDown size={15} className="admin-videos-filter__select-icon" aria-hidden="true" />
+          </div>
         </div>
       </header>
 

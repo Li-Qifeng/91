@@ -238,6 +238,9 @@ func main() {
 		GetNightlyJobStatus: func() api.NightlyJobStatus {
 			return app.nightlyJobStatus()
 		},
+		GetSpider91Status: func(driveID string) (*spider91.CrawlJobStatus, []spider91.HistoryRecord, error) {
+			return app.spider91Status(driveID)
+		},
 		ListDriveDirChildren: func(reqCtx context.Context, driveID, parentID string) ([]api.DriveDirEntry, error) {
 			return app.listDriveDirChildren(reqCtx, driveID, parentID)
 		},
@@ -471,6 +474,30 @@ func formatOptionalRFC3339(t time.Time) string {
 		return ""
 	}
 	return t.Format(time.RFC3339)
+}
+
+// spider91Status 返回指定 driveID 对应的 spider91 Crawler 状态及最近历史。
+// driveID 为空时返回第一个可用的 spider91 drive 状态。
+func (a *App) spider91Status(driveID string) (*spider91.CrawlJobStatus, []spider91.HistoryRecord, error) {
+	a.mu.Lock()
+	if driveID == "" {
+		for id := range a.spider91Crawlers {
+			driveID = id
+			break
+		}
+	}
+	c := a.spider91Crawlers[driveID]
+	a.mu.Unlock()
+	if c == nil {
+		// 没有 spider91 drive 时返回 idle
+		return &spider91.CrawlJobStatus{State: "idle"}, nil, nil
+	}
+	status := c.Status()
+	history, err := c.History(20)
+	if err != nil {
+		return &status, nil, err
+	}
+	return &status, history, nil
 }
 
 // isSpider91UploadKind 是 spider91 迁移目标盘的 allowlist。

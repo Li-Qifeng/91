@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useToast } from "./ToastContext";
 import * as api from "./api";
-import { Globe, Save, Play } from "lucide-react";
+import { Globe, Save, Play, Activity, Clock, CheckCircle, XCircle, SkipForward, Loader } from "lucide-react";
 
 const CATEGORIES: { key: string; label: string }[] = [
   { key: "top", label: "本月Top" },
@@ -16,11 +16,21 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: "mf", label: "最多关注" },
 ];
 
+function fmtDate(iso?: string) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleString("zh-CN");
+}
+
 export function Spider91Page() {
   const { show } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+
+  // status
+  const [status, setStatus] = useState<api.CrawlJobStatus | null>(null);
+  const [history, setHistory] = useState<api.HistoryRecord[]>([]);
 
   const [category, setCategory] = useState("top");
   const [viewtype, setViewtype] = useState("basic");
@@ -37,6 +47,27 @@ export function Spider91Page() {
 
   useEffect(() => {
     loadSettings();
+  }, []);
+
+  // 轮询 spider91 状态
+  useEffect(() => {
+    let mounted = true;
+    async function poll() {
+      try {
+        const res = await api.getSpider91Status();
+        if (!mounted) return;
+        setStatus(res.status);
+        setHistory(res.history);
+      } catch {
+        // 静默忽略轮询失败
+      }
+    }
+    poll();
+    const id = setInterval(poll, 3000);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
   }, []);
 
   async function loadSettings() {
@@ -106,6 +137,9 @@ export function Spider91Page() {
     }
   }
 
+  const state = status?.state ?? "idle";
+  const isRunning = state === "running";
+
   if (loading) {
     return (
       <div className="admin-page">
@@ -126,6 +160,154 @@ export function Spider91Page() {
           <Globe size={20} /> 爬虫设置
         </h1>
       </div>
+
+      {/* 状态面板 */}
+      <div style={{ maxWidth: 720, marginBottom: 24 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+            gap: 12,
+            marginBottom: 16,
+          }}
+        >
+          <div className="admin-card" style={{ padding: 16 }}>
+            <div style={{ fontSize: 12, color: "var(--muted-fg)", marginBottom: 4 }}>
+              当前状态
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
+              {isRunning ? (
+                <>
+                  <Loader size={16} className="spin" style={{ animation: "spin 1s linear infinite" }} /> 运行中
+                </>
+              ) : state === "error" ? (
+                <>
+                  <XCircle size={16} color="#ef4444" /> 错误
+                </>
+              ) : state === "done" ? (
+                <>
+                  <CheckCircle size={16} color="#22c55e" /> 完成
+                </>
+              ) : (
+                <>
+                  <Activity size={16} color="var(--muted-fg)" /> 空闲
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="admin-card" style={{ padding: 16 }}>
+            <div style={{ fontSize: 12, color: "var(--muted-fg)", marginBottom: 4 }}>目标 / 进度</div>
+            <div style={{ fontWeight: 600 }}>
+              {status?.progress ?? 0} / {status?.targetNew ?? targetNew}
+            </div>
+          </div>
+
+          <div className="admin-card" style={{ padding: 16 }}>
+            <div style={{ fontSize: 12, color: "var(--muted-fg)", marginBottom: 4 }}>新增入库</div>
+            <div style={{ fontWeight: 600, color: "#22c55e" }}>{status?.newVideos ?? 0}</div>
+          </div>
+
+          <div className="admin-card" style={{ padding: 16 }}>
+            <div style={{ fontSize: 12, color: "var(--muted-fg)", marginBottom: 4 }}>跳过 / 失败</div>
+            <div style={{ fontWeight: 600 }}>
+              <span style={{ color: "#f59e0b" }}>{status?.skipped ?? 0}</span>
+              {" / "}
+              <span style={{ color: "#ef4444" }}>{status?.failed ?? 0}</span>
+            </div>
+          </div>
+        </div>
+
+        {isRunning && status && status.targetNew > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div
+              style={{
+                height: 6,
+                background: "var(--card-bg)",
+                borderRadius: 3,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  width: `${Math.min(100, (status.progress / status.targetNew) * 100)}%`,
+                  background: "linear-gradient(90deg, #f59e0b, #eab308)",
+                  borderRadius: 3,
+                  transition: "width 0.3s ease",
+                }}
+              />
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted-fg)", marginTop: 4 }}>
+              开始于 {fmtDate(status.startedAt)}
+            </div>
+          </div>
+        )}
+
+        {state === "error" && status?.error && (
+          <div
+            style={{
+              background: "rgba(239,68,68,0.1)",
+              border: "1px solid rgba(239,68,68,0.3)",
+              borderRadius: 8,
+              padding: 12,
+              color: "#ef4444",
+              fontSize: 13,
+              marginBottom: 16,
+            }}
+          >
+            {status.error}
+          </div>
+        )}
+      </div>
+
+      {/* 历史记录 */}
+      {history.length > 0 && (
+        <div style={{ maxWidth: 720, marginBottom: 24 }}>
+          <h3 style={{ fontSize: 16, marginBottom: 12 }}>
+            <Clock size={16} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+            最近任务历史
+          </h3>
+          <div style={{ overflowX: "auto" }}>
+            <table className="admin-table" style={{ minWidth: "100%", fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th>状态</th>
+                  <th>目标</th>
+                  <th>进度</th>
+                  <th>新增</th>
+                  <th>跳过</th>
+                  <th>失败</th>
+                  <th>开始时间</th>
+                  <th>结束时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((rec, idx) => (
+                  <tr key={idx}>
+                    <td>
+                      {rec.state === "done" ? (
+                        <CheckCircle size={14} color="#22c55e" />
+                      ) : rec.state === "error" ? (
+                        <XCircle size={14} color="#ef4444" />
+                      ) : (
+                        <Activity size={14} color="var(--muted-fg)" />
+                      )}
+                    </td>
+                    <td>{rec.targetNew}</td>
+                    <td>{rec.progress}</td>
+                    <td>{rec.newVideos}</td>
+                    <td>{rec.skipped}</td>
+                    <td>{rec.failed}</td>
+                    <td>{fmtDate(rec.startedAt)}</td>
+                    <td>{fmtDate(rec.finishedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="admin-form" style={{ maxWidth: 720 }}>
         <div className="admin-form__row">
@@ -279,9 +461,9 @@ export function Spider91Page() {
           <button
             className="admin-btn"
             onClick={handleRunNow}
-            disabled={running}
+            disabled={running || isRunning}
           >
-            <Play size={14} /> {running ? "触发中" : "立即运行"}
+            <Play size={14} /> {running ? "触发中" : isRunning ? "运行中..." : "立即运行"}
           </button>
         </div>
       </div>
