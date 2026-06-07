@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS videos (
     tags_manual      INTEGER DEFAULT 0,          -- 1 = user explicitly curated tags
     badges           TEXT,                      -- JSON array
     description      TEXT,
+    source_url       TEXT DEFAULT '',
     published_at     INTEGER NOT NULL,          -- unix ms
     created_at       INTEGER NOT NULL,
     updated_at       INTEGER NOT NULL

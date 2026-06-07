@@ -163,6 +163,20 @@ class Porn91Spider:
         target_new: int = None,
         seen_viewkeys: list = None,
         stream_output: bool = False,
+        # ———— 以下为 backend 可配置参数 ————
+        base_url: str = None,
+        category: str = None,
+        viewtype: str = None,
+        ua_list: list = None,
+        user_agent: str = None,
+        min_page_delay: float = None,
+        max_page_delay: float = None,
+        min_detail_delay: float = None,
+        max_detail_delay: float = None,
+        max_retries: int = None,
+        retry_delay: float = None,
+        request_timeout: float = None,
+        extract_meta: bool = False,
     ):
         """
         构造函数。所有参数都有默认值，等同于使用脚本顶部的全局配置。
@@ -176,12 +190,29 @@ class Porn91Spider:
             - --output 仍生效，作为离线归档用（脚本退出时一次性写完整 JSON）。
         """
         self.session = requests.Session()
-        self.session.headers.update(HEADERS)
+        # 请求头：优先使用自定义 ua_list / user_agent，回退到 HEADERS
+        headers = dict(HEADERS)
+        if user_agent:
+            headers["User-Agent"] = user_agent
+        self.session.headers.update(headers)
         # 91porn 没有固定 mode cookie 时，详情页首次请求可能返回与列表卡片
         # 不一致的视频源；固定桌面模式让列表页和详情页解析保持一致。
         self.session.cookies.set("mode", "d")
 
         # 解析后的实际配置；优先使用构造参数，回退到模块级配置
+        self.base_url = (base_url if base_url is not None else BASE_URL).rstrip("/")
+        self.list_category = category if category is not None else LIST_PARAMS.get("category", "top")
+        self.list_viewtype = viewtype if viewtype is not None else LIST_PARAMS.get("viewtype", "basic")
+        self.ua_list = list(ua_list) if ua_list else []
+        self.min_page_delay = float(min_page_delay if min_page_delay is not None else MIN_PAGE_DELAY)
+        self.max_page_delay = float(max_page_delay if max_page_delay is not None else MAX_PAGE_DELAY)
+        self.min_detail_delay = float(min_detail_delay if min_detail_delay is not None else MIN_DETAIL_DELAY)
+        self.max_detail_delay = float(max_detail_delay if max_detail_delay is not None else MAX_DETAIL_DELAY)
+        self.max_retries = int(max_retries if max_retries is not None else MAX_RETRIES)
+        self.retry_delay = float(retry_delay if retry_delay is not None else RETRY_DELAY)
+        self.request_timeout = float(request_timeout if request_timeout is not None else 30)
+        self.extract_meta = bool(extract_meta)
+
         self.output_file = output_file if output_file is not None else OUTPUT_FILE
         self.start_page = max(1, int(start_page or 1))
         # max_pages=None 表示不限制；max_pages=N 表示从 start_page 起爬 N 页
@@ -204,7 +235,7 @@ class Porn91Spider:
             from requests.adapters import HTTPAdapter
             from urllib3.util.retry import Retry
             retry_strategy = Retry(
-                total=MAX_RETRIES,
+                total=self.max_retries,
                 backoff_factor=1,
                 status_forcelist=[429, 500, 502, 503, 504],
             )
@@ -284,16 +315,20 @@ class Porn91Spider:
         if referer:
             headers_extra["Referer"] = referer
 
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, self.max_retries + 1):
             try:
-                self.log(f"正在请求: {description or url} (尝试 {attempt}/{MAX_RETRIES})")
-                response = self.session.get(url, timeout=30, headers=headers_extra)
+                # UA 轮换
+                if self.ua_list:
+                    self.session.headers["User-Agent"] = random.choice(self.ua_list)
+
+                self.log(f"正在请求: {description or url} (尝试 {attempt}/{self.max_retries})")
+                response = self.session.get(url, timeout=self.request_timeout, headers=headers_extra)
 
                 # 检查是否被Cloudflare拦截 (需在 raise_for_status 之前)
                 if response.status_code == 403:
                     self.log("警告: 收到 403 Forbidden，可能被拦截")
-                    if attempt < MAX_RETRIES:
-                        self.random_sleep(RETRY_DELAY, RETRY_DELAY + 3)
+                    if attempt < self.max_retries:
+                        self.random_sleep(self.retry_delay, self.retry_delay + 3)
                         continue
                     return ""
 
@@ -313,22 +348,22 @@ class Porn91Spider:
                 )
                 if is_cf_challenge:
                     self.log("警告: 页面被Cloudflare挑战拦截，需要浏览器环境或正确cookie")
-                    if attempt < MAX_RETRIES:
-                        self.random_sleep(RETRY_DELAY, RETRY_DELAY + 5)
+                    if attempt < self.max_retries:
+                        self.random_sleep(self.retry_delay, self.retry_delay + 5)
                         continue
                     return ""
 
                 return html_content
             except requests.exceptions.HTTPError as e:
                 self.log(f"HTTP错误: {e}")
-                if attempt < MAX_RETRIES:
-                    self.random_sleep(RETRY_DELAY, RETRY_DELAY + 3)
+                if attempt < self.max_retries:
+                    self.random_sleep(self.retry_delay, self.retry_delay + 3)
                 else:
                     return ""
             except requests.exceptions.RequestException as e:
                 self.log(f"请求失败: {e}")
-                if attempt < MAX_RETRIES:
-                    self.random_sleep(RETRY_DELAY, RETRY_DELAY + 3)
+                if attempt < self.max_retries:
+                    self.random_sleep(self.retry_delay, self.retry_delay + 3)
                 else:
                     self.log(f"达到最大重试次数，放弃: {url}")
                     return ""
@@ -362,7 +397,7 @@ class Porn91Spider:
                 continue
             viewkey = match.group(1)
 
-            detail_url = urljoin(BASE_URL, href)
+            detail_url = urljoin(self.base_url, href)
 
             # 提取标题
             title = self._extract_title(link)
@@ -377,7 +412,7 @@ class Porn91Spider:
             if img:
                 thumb_url = img.get('src', '') or img.get('data-original', '')
                 if thumb_url:
-                    thumb_url = urljoin(BASE_URL, thumb_url)
+                    thumb_url = urljoin(self.base_url, thumb_url)
             if not source_id and thumb_url:
                 source_id = self._extract_thumb_source_id(thumb_url)
 
@@ -421,52 +456,135 @@ class Porn91Spider:
 
     def parse_detail_page(self, html: str) -> dict:
         """
-        解析详情页，提取视频直链
-        返回: {"video_url": "...", "source_id": "...", "title": "..."} 或空字典
+        解析详情页，提取视频直链 + 可选元数据
+        返回: {"video_url": "...", "source_id": "...", "title": "...",
+                "views": N, "favorites": N, "likes": N, "dislikes": N,
+                "author": "...", "addtime": "...", "tags": [...],
+                "duration": N, "description": "..."}
+        或空字典
         """
         result = {}
 
         if not html:
             return result
 
+        soup = BeautifulSoup(html, 'lxml')
+
         title = self._extract_detail_title(html)
         if title:
             result["title"] = title
 
-        # 方法1: 解码 strencode2 (主要方式, 页面通过 document.write 动态写入 video 标签)
-        # 格式: document.write(strencode2("%3c%73%6f..."));
+        # 方法1: 解码 strencode2
         strencode_match = re.search(r'strencode2\(["\']([^"\']+)["\']\)', html)
         if strencode_match:
             encoded = strencode_match.group(1)
             try:
-                # strencode2 在JS中等价于 unescape / decodeURIComponent
                 decoded = unquote(encoded)
-
-                # 从解码后的 HTML 片段中提取 src
                 src_match = re.search(r"src=['\"]([^'\"]+)['\"]", decoded)
                 if src_match:
                     video_url = src_match.group(1)
-                    # 规范化双斜杠 (如 https://host//path -> https://host/path)
                     video_url = re.sub(r'(https?://[^/]+)//+', r'\1/', video_url)
                     result["video_url"] = video_url
                     result["source_id"] = self._extract_source_id(video_url)
-                    return result
             except Exception as e:
                 self.log(f"  解码 strencode2 失败: {e}")
 
-        # 方法2: 通用正则匹配页面中的 mp4 链接 (备用, 过滤广告)
-        mp4_match = re.search(
-            r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*',
-            html
-        )
-        if mp4_match:
-            url = mp4_match.group(0)
-            if 'kwai' not in url and 'ad-' not in url.lower():
-                result["video_url"] = url
-                result["source_id"] = self._extract_source_id(url)
-                return result
+        # 如果方法1未成功，方法2: 通用正则匹配 mp4
+        if not result.get("video_url"):
+            mp4_match = re.search(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', html)
+            if mp4_match:
+                url = mp4_match.group(0)
+                if 'kwai' not in url and 'ad-' not in url.lower():
+                    result["video_url"] = url
+                    result["source_id"] = self._extract_source_id(url)
+
+        # 提取元数据（best-effort，不阻塞 video_url）
+        if self.extract_meta and result.get("video_url"):
+            meta = self._extract_detail_meta(soup, html)
+            result.update(meta)
 
         return result
+
+    def _extract_detail_meta(self, soup: BeautifulSoup, html_text: str) -> dict:
+        """从详情页提取额外元数据。best-effort，失败不报错。"""
+        meta = {}
+
+        # views — 多选择器回退
+        for pattern in [r'class=["\']view-total["\'][^>]*>(\d+)', r'id=["\']view["\'][^>]*>(\d+)',
+                        r'class=["\']views?["\'][^>]*>(\d+)', r'title=["\']Views["\'][^>]*>(\d+)']:
+            m = re.search(pattern, html_text, re.IGNORECASE)
+            if m:
+                try:
+                    meta["views"] = int(m.group(1).replace(",", ""))
+                except ValueError:
+                    pass
+                break
+
+        # favorites / likes / dislikes
+        fav_m = re.search(r'class=["\']favorite["\'][^>]*>\s*(\d+)', html_text, re.IGNORECASE)
+        if fav_m:
+            try:
+                meta["favorites"] = int(fav_m.group(1).replace(",", ""))
+            except ValueError:
+                pass
+        like_m = re.search(r'class=["\']like["\'][^>]*>\s*(\d+)', html_text, re.IGNORECASE)
+        if like_m:
+            try:
+                meta["likes"] = int(like_m.group(1).replace(",", ""))
+            except ValueError:
+                pass
+        dislike_m = re.search(r'class=["\']dislike["\'][^>]*>\s*(\d+)', html_text, re.IGNORECASE)
+        if dislike_m:
+            try:
+                meta["dislikes"] = int(dislike_m.group(1).replace(",", ""))
+            except ValueError:
+                pass
+
+        # author
+        author_m = re.search(r'class=["\']author["\'][^>]*>([^<]+)', html_text, re.IGNORECASE)
+        if author_m:
+            meta["author"] = html.unescape(author_m.group(1).strip())
+        else:
+            # 备用: 从用户信息区提取
+            for sel in ['div.user-info a', 'a.username', 'span.username', '.video-author']:
+                el = soup.select_one(sel)
+                if el:
+                    meta["author"] = html.unescape(el.get_text(strip=True))
+                    break
+
+        # addtime
+        addtime_m = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', html_text)
+        if addtime_m:
+            meta["addtime"] = addtime_m.group(1)
+
+        # duration — 从 HTML 文本中提取 HH:MM:SS 或 MM:SS
+        dur_m = re.search(r'(\d{1,2}):(\d{2}):(\d{2})', html_text)
+        if dur_m:
+            h, m, s = int(dur_m.group(1)), int(dur_m.group(2)), int(dur_m.group(3))
+            meta["duration"] = h * 3600 + m * 60 + s
+        else:
+            dur_m2 = re.search(r'(\d{1,2}):(\d{2})', html_text)
+            if dur_m2:
+                m, s = int(dur_m2.group(1)), int(dur_m2.group(2))
+                meta["duration"] = m * 60 + s
+
+        # description
+        for sel in ['div.video-description', 'div.description', 'p.description', '.video-desc']:
+            el = soup.select_one(sel)
+            if el:
+                meta["description"] = html.unescape(el.get_text(strip=True))[:500]
+                break
+
+        # tags
+        tags = []
+        for a in soup.select('div.video-tags a, div.tags a, a.tag'):
+            t = a.get_text(strip=True)
+            if t and t not in tags:
+                tags.append(t)
+        if tags:
+            meta["tags"] = tags
+
+        return meta
 
     def _extract_detail_title(self, html_text: str) -> str:
         soup = BeautifulSoup(html_text, 'lxml')
@@ -520,8 +638,8 @@ class Porn91Spider:
         self.log("=" * 60)
         self.log("91porn 视频爬虫启动")
         self.log("=" * 60)
-        self.log(f"配置: 列表页延时 {MIN_PAGE_DELAY}-{MAX_PAGE_DELAY}s, 详情页延时 {MIN_DETAIL_DELAY}-{MAX_DETAIL_DELAY}s")
-        self.log(f"配置: 最大重试 {MAX_RETRIES} 次, 连续空页上限 {self.max_empty_pages}")
+        self.log(f"配置: 列表页延时 {self.min_page_delay}-{self.max_page_delay}s, 详情页延时 {self.min_detail_delay}-{self.max_detail_delay}s")
+        self.log(f"配置: 最大重试 {self.max_retries} 次, 连续空页上限 {self.max_empty_pages}")
         self.log(f"配置: 起始页 {self.start_page}, 最大爬取页数 {self.max_pages if self.max_pages else '不限'}")
         if self.target_new:
             self.log(f"配置: 目标新增视频数 {self.target_new}")
@@ -546,13 +664,13 @@ class Porn91Spider:
                 break
 
             if page_num == 1:
-                page_url = f"{BASE_URL}?category=top&viewtype=basic"
+                page_url = f"{self.base_url}?category={self.list_category}&viewtype={self.list_viewtype}"
             else:
-                page_url = f"{BASE_URL}?category=top&viewtype=basic&page={page_num}"
+                page_url = f"{self.base_url}?category={self.list_category}&viewtype={self.list_viewtype}&page={page_num}"
 
             if crawled_in_session > 0:
                 self.log("")
-                self.random_sleep(MIN_PAGE_DELAY, MAX_PAGE_DELAY)
+                self.random_sleep(self.min_page_delay, self.max_page_delay)
 
             self.log(f"[页 {page_num}] 请求: {page_url}")
             page_html = self.fetch_page(page_url, f"列表页 第{page_num}页")
@@ -612,7 +730,7 @@ class Porn91Spider:
 
             # 延时控制 (同一批次内第一个视频不延时)
             if idx > 1:
-                self.random_sleep(MIN_DETAIL_DELAY, MAX_DETAIL_DELAY)
+                self.random_sleep(self.min_detail_delay, self.max_detail_delay)
 
             # 获取详情页
             detail_html = self.fetch_page(video['detail_url'], f"详情页 viewkey={video['viewkey']}", referer=referer)
@@ -632,6 +750,10 @@ class Porn91Spider:
                 video["video_url"] = detail_info["video_url"]
                 if detail_info.get("title"):
                     video["title"] = detail_info["title"]
+                # merge 详情页元数据（best-effort）
+                for k in ["views", "favorites", "likes", "dislikes", "author", "addtime", "tags", "duration", "description"]:
+                    if k in detail_info and detail_info[k]:
+                        video[k] = detail_info[k]
                 list_source_id = video.get("source_id", "")
                 detail_source_id = detail_info.get("source_id", "")
                 if list_source_id and detail_source_id and list_source_id != detail_source_id:
@@ -674,7 +796,7 @@ class Porn91Spider:
         """
         output_data = {
             "crawl_time": datetime.now().isoformat(),
-            "source_url": BASE_URL,
+            "source_url": self.base_url,
             "pages_crawled": self.pages_crawled,
             "total_videos": len(self.results),
             "successful": self.processed_videos,
@@ -778,6 +900,30 @@ def main():
     parser.add_argument("--stream-output", action="store_true",
                         help="流式模式：每解析一条视频直链就立即把它作为一行 JSON 写到 stdout 并 flush；"
                              "日志改走 stderr。配合 backend 边读边下载使用。")
+    parser.add_argument("--category", type=str, default=None,
+                        help="列表分类 (top/hot/ori/long/longer/tf/rf/hd/md/mf)")
+    parser.add_argument("--viewtype", type=str, default=None,
+                        help="视图类型 (basic)")
+    parser.add_argument("--ua-list", type=str, default=None,
+                        help="UA 轮换列表（逗号分隔）")
+    parser.add_argument("--user-agent", type=str, default=None,
+                        help="单个自定义 User-Agent")
+    parser.add_argument("--min-page-delay", type=float, default=None,
+                        help="列表页最小延时（秒）")
+    parser.add_argument("--max-page-delay", type=float, default=None,
+                        help="列表页最大延时（秒）")
+    parser.add_argument("--min-detail-delay", type=float, default=None,
+                        help="详情页最小延时（秒）")
+    parser.add_argument("--max-detail-delay", type=float, default=None,
+                        help="详情页最大延时（秒）")
+    parser.add_argument("--max-retries", type=int, default=None,
+                        help="单请求最大重试次数")
+    parser.add_argument("--retry-delay", type=float, default=None,
+                        help="重试基础延时（秒）")
+    parser.add_argument("--request-timeout", type=float, default=None,
+                        help="单次请求超时（秒）")
+    parser.add_argument("--extract-meta", action="store_true",
+                        help="提取详情页元数据 (views/likes/dislikes/author/tags/duration/description)")
 
     args, _ = parser.parse_known_args()
     cli_out = sys.stderr if args.stream_output else sys.stdout
@@ -790,7 +936,7 @@ def main():
 按 Ctrl+C 可随时中断并保存进度
 """, file=cli_out)
 
-    # 加载已知 ID（来自 backend 的 catalog 已入库列表；兼容旧参数名）
+    # 加载已知 ID
     seen_viewkeys = []
     if args.seen_viewkeys_file:
         try:
@@ -804,40 +950,53 @@ def main():
         except Exception as e:
             print(f"警告: 读取 --seen-viewkeys-file 失败: {e}", file=cli_out)
 
+    # 解析 UA 列表
+    ua_list = None
+    if args.ua_list:
+        ua_list = [u.strip() for u in args.ua_list.split(",") if u.strip()]
+
+    # 通用构造参数
+    common_kwargs = dict(
+        output_file=args.output,
+        quiet=args.quiet,
+        seen_viewkeys=seen_viewkeys,
+        stream_output=args.stream_output,
+        category=args.category,
+        viewtype=args.viewtype,
+        ua_list=ua_list,
+        user_agent=args.user_agent,
+        min_page_delay=args.min_page_delay,
+        max_page_delay=args.max_page_delay,
+        min_detail_delay=args.min_detail_delay,
+        max_detail_delay=args.max_detail_delay,
+        max_retries=args.max_retries,
+        retry_delay=args.retry_delay,
+        request_timeout=args.request_timeout,
+        extract_meta=args.extract_meta,
+    )
+
     # 决定运行模式
     if args.target_new is not None:
-        # 凑够 N 个新视频模式：从 page 1 起翻页，直到累计 target_new 个新视频
         spider = Porn91Spider(
-            output_file=args.output,
             start_page=1,
             max_pages=None,
-            resume=False,  # 凑够 N 模式靠 seen_viewkeys 去重，不读 OUTPUT_FILE
-            quiet=args.quiet,
+            resume=False,
             target_new=args.target_new,
-            seen_viewkeys=seen_viewkeys,
-            stream_output=args.stream_output,
+            **common_kwargs,
         )
     elif args.page is not None:
-        # 单页模式（保留作手动调试用）：start_page=N, max_pages=1
         start_page = max(1, args.page)
         max_pages = args.max_pages if args.max_pages and args.max_pages > 0 else 1
         spider = Porn91Spider(
-            output_file=args.output,
             start_page=start_page,
             max_pages=max_pages,
             resume=False,
-            quiet=args.quiet,
-            seen_viewkeys=seen_viewkeys,
-            stream_output=args.stream_output,
+            **common_kwargs,
         )
     else:
-        # 全量模式（向后兼容）：从 page 1 起爬到末尾
         spider = Porn91Spider(
-            output_file=args.output,
             resume=False if args.no_resume else None,
-            quiet=args.quiet,
-            seen_viewkeys=seen_viewkeys,
-            stream_output=args.stream_output,
+            **common_kwargs,
         )
 
     try:

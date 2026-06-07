@@ -71,6 +71,7 @@ type Video struct {
 	Hidden            bool      `json:"hidden"`
 	Badges            []string  `json:"badges"`
 	Description       string    `json:"description"`
+	SourceUrl         string    `json:"sourceUrl"`
 	PublishedAt       time.Time `json:"publishedAt"`
 	CreatedAt         time.Time `json:"createdAt"`
 	UpdatedAt         time.Time `json:"updatedAt"`
@@ -93,13 +94,13 @@ INSERT INTO videos (
   duration_seconds, size_bytes, ext, quality, thumbnail_url, thumbnail_status,
   preview_file_id, preview_local, preview_status,
   views, favorites, comments, likes, dislikes,
-  category, hidden, badges, description, published_at, created_at, updated_at
+  category, hidden, badges, description, source_url, published_at, created_at, updated_at
 ) VALUES (
   ?, ?, ?, ?, ?, ?, ?, ?, ?,
   ?, ?, ?, ?, ?, CASE WHEN COALESCE(?, '') != '' THEN 'ready' ELSE 'pending' END,
   ?, ?, ?,
   ?, ?, ?, ?, ?,
-  ?, ?, ?, ?, ?, ?, ?
+  ?, ?, ?, ?, ?, ?, ?, ?
 )
 ON CONFLICT(id) DO UPDATE SET
   file_name       = CASE
@@ -130,10 +131,6 @@ ON CONFLICT(id) DO UPDATE SET
   ext             = excluded.ext,
   quality         = excluded.quality,
   thumbnail_url   = excluded.thumbnail_url,
-  -- thumbnail_url 写非空就意味着文件已就绪（要么 worker 抽帧填的本地 /p/thumb/<id>，
-  -- 要么网盘 API 直接给的远程 URL，要么管理员手动指定）。同步把 status 标 'ready'，
-  -- 避免出现 "url 非空 + status='pending'" 的脏状态。url 被改成空（本调用不发生，
-  -- 走 clearVolatileOneDriveThumbnails 直 SQL）保留原状态。
   thumbnail_status= CASE
                       WHEN COALESCE(excluded.thumbnail_url, '') != '' THEN 'ready'
                       ELSE videos.thumbnail_status
@@ -141,13 +138,14 @@ ON CONFLICT(id) DO UPDATE SET
   category        = excluded.category,
   badges          = excluded.badges,
   description     = excluded.description,
+  source_url      = excluded.source_url,
   updated_at      = excluded.updated_at
 `,
 		v.ID, v.DriveID, v.FileID, v.FileName, v.ContentHash, v.ParentID, v.Title, v.Author, string(tagsJSON),
 		v.DurationSeconds, v.Size, v.Ext, v.Quality, v.ThumbnailURL, v.ThumbnailURL,
 		v.PreviewFileID, v.PreviewLocal, nullableStatus(v.PreviewStatus),
 		v.Views, v.Favorites, v.Comments, v.Likes, v.Dislikes,
-		v.Category, boolToInt(v.Hidden), string(badgesJSON), v.Description,
+		v.Category, boolToInt(v.Hidden), string(badgesJSON), v.Description, v.SourceUrl,
 		v.PublishedAt.UnixMilli(), v.CreatedAt.UnixMilli(), v.UpdatedAt.UnixMilli(),
 	)
 	if err != nil {
@@ -1882,6 +1880,7 @@ duration_seconds, size_bytes, COALESCE(ext, ''), COALESCE(quality, ''), COALESCE
 COALESCE(preview_file_id, ''), COALESCE(preview_local, ''), COALESCE(preview_status, 'pending'),
 views, favorites, comments, likes, dislikes,
 COALESCE(category, ''), COALESCE(hidden, 0), COALESCE(badges, '[]'), COALESCE(description, ''),
+COALESCE(source_url, ''),
 published_at, created_at, updated_at
 `
 
@@ -1953,6 +1952,7 @@ func scanVideo(row rowScanner) (*Video, error) {
 		&v.PreviewFileID, &v.PreviewLocal, &v.PreviewStatus,
 		&v.Views, &v.Favorites, &v.Comments, &v.Likes, &v.Dislikes,
 		&v.Category, &hidden, &badgesJSON, &v.Description,
+		&v.SourceUrl,
 		&publishedAt, &createdAt, &updatedAt,
 	)
 	if err != nil {

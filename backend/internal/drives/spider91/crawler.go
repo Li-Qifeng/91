@@ -221,12 +221,21 @@ type CrawlResult struct {
 
 // spiderVideoEntry 对应 spider_91porn.py 输出 JSON 中的单条视频。
 type spiderVideoEntry struct {
-	Title     string `json:"title"`
-	ThumbURL  string `json:"thumb_url"`
-	VideoURL  string `json:"video_url"`
-	Viewkey   string `json:"viewkey"`
-	SourceID  string `json:"source_id"`
-	DetailURL string `json:"detail_url"`
+	Title       string   `json:"title"`
+	ThumbURL    string   `json:"thumb_url"`
+	VideoURL    string   `json:"video_url"`
+	Viewkey     string   `json:"viewkey"`
+	SourceID    string   `json:"source_id"`
+	DetailURL   string   `json:"detail_url"`
+	Views       int      `json:"views"`
+	Favorites   int      `json:"favorites"`
+	Likes       int      `json:"likes"`
+	Dislikes    int      `json:"dislikes"`
+	Author      string   `json:"author"`
+	Addtime     string   `json:"addtime"`
+	Tags        []string `json:"tags"`
+	Duration    int      `json:"duration"`
+	Description string   `json:"description"`
 }
 
 // RunOnce 执行一次"跑爬虫 → 下载 → 入库"流程：
@@ -557,25 +566,41 @@ func (c *Crawler) processOne(ctx context.Context, videoID string, item spiderVid
 
 	// 入库
 	now := time.Now()
+	author := DefaultAuthor
+	if strings.TrimSpace(item.Author) != "" {
+		author = item.Author
+	}
+	tags = mergeCatalogTags(tags, item.Tags)
+	publishedAt := now
+	if item.Addtime != "" {
+		if t, err := time.Parse("2006-01-02 15:04:05", item.Addtime); err == nil {
+			publishedAt = t
+		}
+	}
 	v := &catalog.Video{
-		ID:            videoID,
-		DriveID:       c.cfg.Driver.ID(),
-		FileID:        videoFile,
-		FileName:      videoFile,
-		Title:         title,
-		Author:        DefaultAuthor,
-		Tags:          tags,
-		Ext:           strings.TrimPrefix(videoExt, "."),
-		Quality:       "HD",
-		Size:          videoSize,
-		PreviewStatus: "pending",
-		PublishedAt:   now,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:              videoID,
+		DriveID:         c.cfg.Driver.ID(),
+		FileID:          videoFile,
+		FileName:        videoFile,
+		Title:           title,
+		Author:          author,
+		Tags:            tags,
+		DurationSeconds: item.Duration,
+		Ext:             strings.TrimPrefix(videoExt, "."),
+		Quality:         "HD",
+		Size:            videoSize,
+		PreviewStatus:   "pending",
+		Views:           item.Views,
+		Favorites:       item.Favorites,
+		Likes:           item.Likes,
+		Dislikes:        item.Dislikes,
+		Description:     item.Description,
+		SourceUrl:       item.DetailURL,
+		PublishedAt:     publishedAt,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	if thumbReady {
-		// 设了 ThumbnailURL 后 thumb worker 会跳过这条视频，
-		// 不再尝试用 ffmpeg 抽帧（封面已经是网站原图）。
 		v.ThumbnailURL = "/p/thumb/" + v.ID
 	}
 	if err := c.cfg.Catalog.UpsertVideo(ctx, v); err != nil {
