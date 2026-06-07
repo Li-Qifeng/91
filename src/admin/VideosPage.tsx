@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { ChevronDown, Edit, RefreshCw, Search, CheckSquare, Square, Image, Trash2 } from "lucide-react";
+import { ChevronDown, Edit, RefreshCw, Search, CheckSquare, Square, Image, Trash2, Globe } from "lucide-react";
 import * as api from "./api";
 import { useToast } from "./ToastContext";
 import { Modal } from "./Modal";
@@ -84,6 +84,32 @@ export function VideosPage() {
   const listSummary = driveId
     ? `${driveNameMap.get(driveId) ?? driveId}：共 ${total} 个视频，第 ${page} / ${totalPages} 页，显示 ${pageStart}-${pageEnd}`
     : `全部网盘：共 ${total} 个视频，第 ${page} / ${totalPages} 页，显示 ${pageStart}-${pageEnd}`;
+
+  async function handleRefetch(v: api.AdminVideo) {
+    try {
+      await api.refetchMeta(v.id);
+      show("已补抓元数据", "success");
+    } catch (e) {
+      show(e instanceof Error ? e.message : "补抓失败", "error");
+    }
+  }
+
+  async function handleBatchRefetch() {
+    if (selectedIds.size === 0) return;
+    const ids = [...selectedIds];
+    let success = 0;
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        await api.refetchMeta(id);
+        success++;
+      } catch {
+        failed++;
+      }
+    }
+    show(`批量补抓完成，成功 ${success} / ${ids.length} 个`, failed === 0 ? "success" : "info");
+    setSelectedIds(new Set());
+  }
 
   async function handleRegen(v: api.AdminVideo) {
     try {
@@ -274,6 +300,9 @@ export function VideosPage() {
               <button type="button" className="admin-btn is-primary admin-videos-bulk-actions__btn" onClick={handleBatchRegen}>
                 <RefreshCw size={13} /> 批量重生预览视频
               </button>
+              <button type="button" className="admin-btn admin-videos-bulk-actions__btn" onClick={handleBatchRefetch}>
+                <Globe size={13} /> 批量补抓元数据
+              </button>
               <button type="button" className="admin-btn is-danger admin-videos-bulk-actions__btn" onClick={handleBatchDelete}>
                 <Trash2 size={13} /> 批量删除
               </button>
@@ -380,6 +409,9 @@ export function VideosPage() {
                   <td className="is-actions" data-label="操作">
                     <button type="button" className="admin-btn" onClick={() => setEditing(v)} title="编辑视频">
                       <Edit size={13} />
+                    </button>{" "}
+                    <button type="button" className="admin-btn" onClick={() => handleRefetch(v)} title="补抓元数据">
+                      <Globe size={13} />
                     </button>{" "}
                     <button type="button" className="admin-btn" onClick={() => handleRegen(v)} title="重生预览视频">
                       <RefreshCw size={13} />

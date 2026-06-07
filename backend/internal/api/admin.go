@@ -55,6 +55,8 @@ type AdminServer struct {
 	OnRegenFailedThumbnails    func(driveID string)
 	OnRegenFailedFingerprints  func(driveID string)
 	OnDeleteVideo              func(ctx context.Context, videoID string) (DeleteVideoResult, error)
+	// OnRefetchMeta 重新抓取视频的详情页元数据（仅限 spider91 来源且有 source_url 的视频）。
+	OnRefetchMeta              func(ctx context.Context, videoID string) error
 	GetDriveGenerationStatuses func() map[string]DriveGenerationStatuses
 	// OnTeaserEnabledChanged 在 per-drive 预览视频开关被切换后调用。
 	// enabled=true 时上层应该重新把 pending 预览视频入队（类似旧的全局开关从关到开）；
@@ -152,6 +154,7 @@ func (a *AdminServer) Register(r chi.Router) {
 			r.Delete("/videos/{id}", a.handleDeleteVideo)
 			r.Post("/videos/regen-preview", a.handleRegenAllPreviews)
 			r.Post("/videos/{id}/regen-preview", a.handleRegenPreview)
+			r.Post("/videos/{id}/refetch-meta", a.handleRefetchMeta)
 
 			// 标签
 			r.Get("/tags", a.handleListTags)
@@ -1080,6 +1083,19 @@ func (a *AdminServer) handleRegenPreview(w http.ResponseWriter, r *http.Request)
 		a.OnRegenPreview(id)
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
+}
+
+func (a *AdminServer) handleRefetchMeta(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if a.OnRefetchMeta == nil {
+		writeErr(w, http.StatusNotImplemented, errors.New("refetch meta not configured"))
+		return
+	}
+	if err := a.OnRefetchMeta(r.Context(), id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (a *AdminServer) handleRegenAllPreviews(w http.ResponseWriter, r *http.Request) {

@@ -206,6 +206,9 @@ func main() {
 		OnDeleteVideo: func(reqCtx context.Context, videoID string) (api.DeleteVideoResult, error) {
 			return app.deleteVideo(reqCtx, videoID)
 		},
+		OnRefetchMeta: func(reqCtx context.Context, videoID string) error {
+			return app.refetchVideoMeta(reqCtx, videoID)
+		},
 		GetDriveGenerationStatuses: func() map[string]api.DriveGenerationStatuses {
 			return app.driveGenerationStatuses()
 		},
@@ -498,6 +501,69 @@ func (a *App) spider91Status(driveID string) (*spider91.CrawlJobStatus, []spider
 		return &status, nil, err
 	}
 	return &status, history, nil
+}
+
+// refetchVideoMeta 重新抓取指定视频的详情页元数据并更新数据库。
+// 仅对 spider91 来源且 source_url 非空的视频有效。
+func (a *App) refetchVideoMeta(ctx context.Context, videoID string) error {
+	v, err := a.cat.GetVideo(ctx, videoID)
+	if err != nil {
+		return fmt.Errorf("lookup video: %w", err)
+	}
+	if v == nil {
+		return errors.New("video not found")
+	}
+	if !strings.HasPrefix(v.ID, spider91.Kind+"-") {
+		return errors.New("only spider91 videos support refetch meta")
+	}
+	if strings.TrimSpace(v.SourceUrl) == "" {
+		return errors.New("video has no source_url")
+	}
+
+	// 找到该视频所属的 spider91 crawler
+	driveID := v.DriveID
+	a.mu.Lock()
+	c := a.spider91Crawlers[driveID]
+	a.mu.Unlock()
+	if c == nil {
+		return fmt.Errorf("spider91 crawler not attached for drive %s", driveID)
+	}
+
+	meta, err := c.RefetchMeta(ctx, v.SourceUrl)
+	if err != nil {
+		return fmt.Errorf("refetch meta: %w", err)
+	}
+
+	// 更新视频字段（只更新非零值）
+	if meta.Views > 0 {
+		v.Views = meta.Views
+	}
+	if meta.Favorites > 0 {
+		v.Favorites = meta.Favorites
+	}
+	if meta.Likes > 0 {
+		v.Likes = meta.Likes
+	}
+	if meta.Dislikes > 0 {
+		v.Dislikes = meta.Dislikes
+	}
+	if meta.Author != "" {
+		v.Author = meta.Author
+	}
+	if len(meta.Tags) > 0 {
+		v.Tags = meta.Tags
+	}
+	if meta.Duration > 0 {
+		v.DurationSeconds = meta.Duration
+	}
+	if meta.Description != "" {
+		v.Description = meta.Description
+	}
+	v.UpdatedAt = time.Now()
+	if err := a.cat.UpsertVideo(ctx, v); err != nil {
+		return fmt.Errorf("update video: %w", err)
+	}
+	return nil
 }
 
 // isSpider91UploadKind 是 spider91 迁移目标盘的 allowlist。

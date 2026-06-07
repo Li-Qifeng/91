@@ -368,6 +368,13 @@ export function regenPreview(id: string) {
   );
 }
 
+export function refetchMeta(id: string) {
+  return request<{ ok: boolean }>(
+    `/videos/${encodeURIComponent(id)}/refetch-meta`,
+    { method: "POST" }
+  );
+}
+
 // ---------- Tags ----------
 
 export type AdminTag = {

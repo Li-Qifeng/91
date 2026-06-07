@@ -1319,3 +1319,130 @@ func validateVideoFile(path string) error {
 	}
 	return nil
 }
+
+// RefetchedMeta 是从 source_url 重新抓取到的元数据。
+type RefetchedMeta struct {
+	Views       int      `json:"views"`
+	Favorites   int      `json:"favorites"`
+	Likes       int      `json:"likes"`
+	Dislikes    int      `json:"dislikes"`
+	Author      string   `json:"author"`
+	Tags        []string `json:"tags"`
+	Duration    int      `json:"duration"`
+	Description string   `json:"description"`
+}
+
+// RefetchMeta 从 source_url 重新抓取详情页元数据。
+// 复用 Crawler 配置中的 HTTPClient / Proxy / UA 等，以尽量降低被封概率。
+func (c *Crawler) RefetchMeta(ctx context.Context, sourceURL string) (*RefetchedMeta, error) {
+	if strings.TrimSpace(sourceURL) == "" {
+		return nil, errors.New("source_url is empty")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", c.pickUA())
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+
+	resp, err := c.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	if err != nil {
+		return nil, err
+	}
+	htmlText := string(body)
+
+	m := &RefetchedMeta{}
+
+	// views
+	for _, re := range []*regexp.Regexp{
+		regexp.MustCompile(`class=["']view-total["'][^>]*>(\d+)`),
+		regexp.MustCompile(`id=["']view["'][^>]*>(\d+)`),
+		regexp.MustCompile(`class=["']views?["'][^>]*>(\d+)`),
+	} {
+		if match := re.FindStringSubmatch(htmlText); match != nil {
+			if v, err := strconv.Atoi(strings.ReplaceAll(match[1], ",", "")); err == nil {
+				m.Views = v
+				break
+			}
+		}
+	}
+
+	// favorites
+	if match := regexp.MustCompile(`class=["']favorite["'][^>]*>\s*(\d+)`).FindStringSubmatch(htmlText); match != nil {
+		if v, err := strconv.Atoi(strings.ReplaceAll(match[1], ",", "")); err == nil {
+			m.Favorites = v
+		}
+	}
+	// likes
+	if match := regexp.MustCompile(`class=["']like["'][^>]*>\s*(\d+)`).FindStringSubmatch(htmlText); match != nil {
+		if v, err := strconv.Atoi(strings.ReplaceAll(match[1], ",", "")); err == nil {
+			m.Likes = v
+		}
+	}
+	// dislikes
+	if match := regexp.MustCompile(`class=["']dislike["'][^>]*>\s*(\d+)`).FindStringSubmatch(htmlText); match != nil {
+		if v, err := strconv.Atoi(strings.ReplaceAll(match[1], ",", "")); err == nil {
+			m.Dislikes = v
+		}
+	}
+
+	// author
+	if match := regexp.MustCompile(`class=["']author["'][^>]*>([^<]+)`).FindStringSubmatch(htmlText); match != nil {
+		m.Author = strings.TrimSpace(match[1])
+	}
+
+	// duration — HH:MM:SS 或 MM:SS
+	if match := regexp.MustCompile(`(\d{1,2}):(\d{2}):(\d{2})`).FindStringSubmatch(htmlText); match != nil {
+		h, mm, s := atoi(match[1]), atoi(match[2]), atoi(match[3])
+		m.Duration = h*3600 + mm*60 + s
+	} else if match := regexp.MustCompile(`(\d{1,2}):(\d{2})`).FindStringSubmatch(htmlText); match != nil {
+		mm, s := atoi(match[1]), atoi(match[2])
+		m.Duration = mm*60 + s
+	}
+
+	// description
+	for _, re := range []*regexp.Regexp{
+		regexp.MustCompile(`<div[^>]*class=["'](?:video-description|description|video-desc)["'][^>]*>([\s\S]*?)</div>`),
+	} {
+		if match := re.FindStringSubmatch(htmlText); match != nil {
+			// 简单去标签
+			text := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(match[1], " ")
+			m.Description = strings.TrimSpace(text)
+			if len(m.Description) > 500 {
+				m.Description = m.Description[:500]
+			}
+			break
+		}
+	}
+
+	// tags — 从 a 标签中提取常见 tag 类名
+	tagSet := map[string]bool{}
+	for _, re := range []*regexp.Regexp{
+		regexp.MustCompile(`<a[^>]*class=["']tag["'][^>]*>([^<]+)`),
+		regexp.MustCompile(`<a[^>]*href=["'][^"']*tag[^"']*["'][^>]*>([^<]+)`),
+	} {
+		for _, match := range re.FindAllStringSubmatch(htmlText, -1) {
+			t := strings.TrimSpace(match[1])
+			if t != "" && !tagSet[t] {
+				tagSet[t] = true
+				m.Tags = append(m.Tags, t)
+			}
+		}
+	}
+
+	return m, nil
+}
+
+func atoi(s string) int {
+	v, _ := strconv.Atoi(s)
+	return v
+}
