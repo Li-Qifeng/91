@@ -584,8 +584,9 @@ func (a *App) loadSpider91UploadDriveID(ctx context.Context) {
 	a.mu.Unlock()
 }
 
-// spider91ExtraArgs 从 catalog settings 中读取全局 spider91 配置并转为 CLI 参数。
-func (a *App) spider91ExtraArgs(ctx context.Context) []string {
+// spider91Categories 从 catalog settings 中读取全局 spider91 分类优先级。
+// 兼容旧配置：优先使用 categories 数组；不存在时回退到单个 category。
+func (a *App) spider91Categories(ctx context.Context) []string {
 	cfgJSON, err := a.cat.GetSetting(ctx, "spider91.config", "")
 	if err != nil || cfgJSON == "" || cfgJSON == "{}" {
 		return nil
@@ -595,48 +596,104 @@ func (a *App) spider91ExtraArgs(ctx context.Context) []string {
 		log.Printf("[spider91] parse config json: %v", err)
 		return nil
 	}
-	var args []string
-	add := func(key string, flag string) {
-		if v, ok := m[key]; ok && v != nil && v != "" {
-			switch val := v.(type) {
-			case string:
-				if val != "" {
-					args = append(args, flag, val)
+
+	seen := make(map[string]bool)
+	var categories []string
+	addCategory := func(raw string) {
+		category := strings.TrimSpace(raw)
+		if category == "" || seen[category] {
+			return
+		}
+		seen[category] = true
+		categories = append(categories, category)
+	}
+
+	if v, ok := m["categories"]; ok {
+		switch val := v.(type) {
+		case []any:
+			for _, item := range val {
+				if s, ok := item.(string); ok {
+					addCategory(s)
 				}
-			case float64:
-				args = append(args, flag, fmt.Sprintf("%.0f", val))
-			case bool:
-				if val {
-					args = append(args, flag)
-				}
-			case []any:
-				if len(val) > 0 {
-					parts := make([]string, 0, len(val))
-					for _, item := range val {
-						if s, ok := item.(string); ok && s != "" {
-							parts = append(parts, s)
-						}
-					}
-					if len(parts) > 0 {
-						args = append(args, flag, strings.Join(parts, ","))
-					}
-				}
+			}
+		case []string:
+			for _, item := range val {
+				addCategory(item)
 			}
 		}
 	}
-	add("category", "--category")
-	add("viewtype", "--viewtype")
-	add("ua_list", "--ua-list")
-	add("user_agent", "--user-agent")
-	add("min_page_delay", "--min-page-delay")
-	add("max_page_delay", "--max-page-delay")
-	add("min_detail_delay", "--min-detail-delay")
-	add("max_detail_delay", "--max-detail-delay")
-	add("max_retries", "--max-retries")
-	add("retry_delay", "--retry-delay")
-	add("request_timeout", "--request-timeout")
-	add("extract_meta", "--extract-meta")
-	return args
+	if len(categories) == 0 {
+		if v, ok := m["category"].(string); ok {
+			addCategory(v)
+		}
+	}
+	return categories
+}
+
+func spider91ArgsForCategory(category string) []string {
+	category = strings.TrimSpace(category)
+	if category == "" {
+		return nil
+	}
+	return []string{"--category", category}
+}
+
+func mergeSpider91Results(results []*spider91.CrawlResult, targetNew int) *spider91.CrawlResult {
+	out := &spider91.CrawlResult{TargetNew: targetNew}
+	for _, res := range results {
+		if res == nil {
+			continue
+		}
+		out.TotalEntries += res.TotalEntries
+		out.NewVideos += res.NewVideos
+		out.Skipped += res.Skipped
+		out.Failed += res.Failed
+		out.SeenSnapshot += res.SeenSnapshot
+	}
+	return out
+}
+
+func (a *App) runSpider91Category(ctx context.Context, c *spider91.Crawler, driveID, category string, targetNew int) (*spider91.CrawlResult, error) {
+	c.SetExtraArgs(spider91ArgsForCategory(category))
+	label := strings.TrimSpace(category)
+	if label == "" {
+		label = "default"
+	}
+	log.Printf("[spider91] drive=%s start crawl category=%s target_new=%d", driveID, label, targetNew)
+	res, err := c.RunOnce(ctx, targetNew)
+	if err != nil {
+		log.Printf("[spider91] drive=%s category=%s crawl failed: %v", driveID, label, err)
+	} else if res != nil {
+		log.Printf("[spider91] drive=%s category=%s crawl done target=%d total=%d new=%d skipped=%d failed=%d seen_snapshot=%d",
+			driveID, label, res.TargetNew, res.TotalEntries, res.NewVideos, res.Skipped, res.Failed, res.SeenSnapshot)
+	}
+	return res, err
+}
+
+func (a *App) runSpider91Categories(ctx context.Context, c *spider91.Crawler, driveID string, categories []string, targetNew int) (*spider91.CrawlResult, error) {
+	if len(categories) == 0 {
+		return a.runSpider91Category(ctx, c, driveID, "", targetNew)
+	}
+	remaining := targetNew
+	var results []*spider91.CrawlResult
+	var firstErr error
+	for _, category := range categories {
+		if err := ctx.Err(); err != nil {
+			return mergeSpider91Results(results, targetNew), err
+		}
+		if remaining <= 0 {
+			break
+		}
+		res, err := a.runSpider91Category(ctx, c, driveID, category, remaining)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if res != nil {
+			results = append(results, res)
+			remaining -= res.NewVideos
+		}
+	}
+	return mergeSpider91Results(results, targetNew), firstErr
 }
 
 func (a *App) driveGenerationStatuses() map[string]api.DriveGenerationStatuses {
@@ -2524,9 +2581,8 @@ func (a *App) runSpider91CrawlWithTaskContext(ctx context.Context, driveID strin
 		return
 	}
 
-	// 全局 spider91 配置 → ExtraArgs
-	extraArgs := a.spider91ExtraArgs(ctx)
-	c.SetExtraArgs(extraArgs)
+	// 全局 spider91 配置 → 分类优先级
+	categories := a.spider91Categories(ctx)
 
 	targetNew := spider91IntCred(d, "target_new", 0)
 	if targetNew <= 0 {
@@ -2541,8 +2597,8 @@ func (a *App) runSpider91CrawlWithTaskContext(ctx context.Context, driveID strin
 		targetNew = spider91.DefaultTargetNew
 	}
 
-	log.Printf("[spider91] drive=%s start crawl target_new=%d", driveID, targetNew)
-	res, runErr := c.RunOnce(ctx, targetNew)
+	log.Printf("[spider91] drive=%s start crawl target_new=%d categories=%v", driveID, targetNew, categories)
+	res, runErr := a.runSpider91Categories(ctx, c, driveID, categories, targetNew)
 	if runErr != nil {
 		log.Printf("[spider91] drive=%s crawl failed: %v", driveID, runErr)
 	} else if res != nil {

@@ -421,18 +421,8 @@ export type Settings = {
 };
 
 export type Spider91Config = {
+  categories?: string[];
   category?: string;
-  viewtype?: string;
-  ua_list?: string[];
-  user_agent?: string;
-  min_page_delay?: number;
-  max_page_delay?: number;
-  min_detail_delay?: number;
-  max_detail_delay?: number;
-  max_retries?: number;
-  retry_delay?: number;
-  request_timeout?: number;
-  extract_meta?: boolean;
 };
 
 export function getSettings() {

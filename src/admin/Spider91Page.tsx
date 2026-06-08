@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useToast } from "./ToastContext";
 import * as api from "./api";
-import { Globe, Save, Play, Activity, Clock, CheckCircle, XCircle, Loader } from "lucide-react";
+import { Globe, Save, Play, Activity, Clock, CheckCircle, XCircle, Loader, ChevronUp, ChevronDown } from "lucide-react";
 
 const CATEGORIES: { key: string; label: string }[] = [
   { key: "top", label: "本月Top" },
@@ -32,17 +32,7 @@ export function Spider91Page() {
   const [status, setStatus] = useState<api.CrawlJobStatus | null>(null);
   const [history, setHistory] = useState<api.HistoryRecord[]>([]);
 
-  const [category, setCategory] = useState("top");
-  const [viewtype, setViewtype] = useState("basic");
-  const [uaListStr, setUaListStr] = useState("");
-  const [minPageDelay, setMinPageDelay] = useState(3);
-  const [maxPageDelay, setMaxPageDelay] = useState(6);
-  const [minDetailDelay, setMinDetailDelay] = useState(2);
-  const [maxDetailDelay, setMaxDetailDelay] = useState(5);
-  const [maxRetries, setMaxRetries] = useState(3);
-  const [retryDelay, setRetryDelay] = useState(5);
-  const [requestTimeout, setRequestTimeout] = useState(30);
-  const [extractMeta, setExtractMeta] = useState(true);
+  const [categories, setCategories] = useState<string[]>(["top"]);
   const [targetNew, setTargetNew] = useState(15);
 
   useEffect(() => {
@@ -74,17 +64,14 @@ export function Spider91Page() {
     try {
       const s = await api.getSettings();
       const cfg = s.spider91Config ?? {};
-      if (cfg.category) setCategory(cfg.category);
-      if (cfg.viewtype) setViewtype(cfg.viewtype);
-      if (cfg.ua_list) setUaListStr((cfg.ua_list as string[]).join(", "));
-      if (cfg.min_page_delay != null) setMinPageDelay(cfg.min_page_delay);
-      if (cfg.max_page_delay != null) setMaxPageDelay(cfg.max_page_delay);
-      if (cfg.min_detail_delay != null) setMinDetailDelay(cfg.min_detail_delay);
-      if (cfg.max_detail_delay != null) setMaxDetailDelay(cfg.max_detail_delay);
-      if (cfg.max_retries != null) setMaxRetries(cfg.max_retries);
-      if (cfg.retry_delay != null) setRetryDelay(cfg.retry_delay);
-      if (cfg.request_timeout != null) setRequestTimeout(cfg.request_timeout);
-      if (cfg.extract_meta != null) setExtractMeta(cfg.extract_meta);
+      const nextCategories = Array.isArray(cfg.categories)
+        ? cfg.categories.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [];
+      if (nextCategories.length > 0) {
+        setCategories(Array.from(new Set(nextCategories)));
+      } else if (cfg.category) {
+        setCategories([cfg.category]);
+      }
       if (s.spider91TargetNew > 0) setTargetNew(s.spider91TargetNew);
     } catch {
       show("加载设置失败", "error");
@@ -93,25 +80,28 @@ export function Spider91Page() {
     }
   }
 
+  function toggleCategory(key: string) {
+    setCategories((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+    );
+  }
+
+  function moveCategory(key: string, direction: -1 | 1) {
+    setCategories((prev) => {
+      const idx = prev.indexOf(key);
+      const nextIdx = idx + direction;
+      if (idx < 0 || nextIdx < 0 || nextIdx >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[nextIdx]] = [next[nextIdx], next[idx]];
+      return next;
+    });
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
-      const uaList = uaListStr
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
       const cfg: api.Spider91Config = {
-        category: category || undefined,
-        viewtype: viewtype || undefined,
-        ua_list: uaList.length > 0 ? uaList : undefined,
-        min_page_delay: minPageDelay,
-        max_page_delay: maxPageDelay,
-        min_detail_delay: minDetailDelay,
-        max_detail_delay: maxDetailDelay,
-        max_retries: maxRetries,
-        retry_delay: retryDelay,
-        request_timeout: requestTimeout,
-        extract_meta: extractMeta,
+        categories,
       };
       await api.updateSettings({
         spider91Config: cfg,
@@ -311,143 +301,76 @@ export function Spider91Page() {
 
       <div className="admin-form" style={{ maxWidth: 720 }}>
         <div className="admin-form__row">
-          <label className="admin-form__label">分类</label>
-          <select
-            className="admin-form__input"
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-          >
-            {CATEGORIES.map((c) => (
-              <option key={c.key} value={c.key}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-          <p className="admin-form__hint">选择要爬取的列表分类</p>
+          <label className="admin-form__label">分类优先级</label>
+          <p className="admin-form__hint" style={{ marginTop: 0 }}>
+            勾选要爬取的分类，并用上下按钮调整轮询顺序。运行时会按优先级逐类补抓，达到目标新增数后停止。
+          </p>
+          <div style={{ display: "grid", gap: 8 }}>
+            {CATEGORIES.map((c) => {
+              const selected = categories.includes(c.key);
+              const order = categories.indexOf(c.key);
+              return (
+                <div
+                  key={c.key}
+                  className="admin-card"
+                  style={{
+                    padding: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    opacity: selected ? 1 : 0.55,
+                  }}
+                >
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => toggleCategory(c.key)}
+                    />
+                    <span style={{ fontWeight: 600 }}>{c.label}</span>
+                    {selected && (
+                      <span style={{ color: "var(--muted-fg)", fontSize: 12 }}>
+                        #{order + 1}
+                      </span>
+                    )}
+                  </label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      type="button"
+                      className="admin-btn"
+                      style={{ padding: "6px 8px" }}
+                      disabled={!selected || order <= 0}
+                      onClick={() => moveCategory(c.key, -1)}
+                    >
+                      <ChevronUp size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-btn"
+                      style={{ padding: "6px 8px" }}
+                      disabled={!selected || order < 0 || order >= categories.length - 1}
+                      onClick={() => moveCategory(c.key, 1)}
+                    >
+                      <ChevronDown size={14} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="admin-form__row">
-          <label className="admin-form__label">视图类型</label>
+          <label className="admin-form__label">目标新增视频数</label>
           <input
             className="admin-form__input"
-            type="text"
-            value={viewtype}
-            onChange={(e) => setViewtype(e.target.value)}
+            type="number"
+            min={1}
+            value={targetNew}
+            onChange={(e) => setTargetNew(Number(e.target.value))}
           />
-          <p className="admin-form__hint">目前仅支持 basic</p>
-        </div>
-
-        <div className="admin-form__row">
-          <label className="admin-form__label">UA 轮换列表</label>
-          <textarea
-            className="admin-form__input"
-            rows={3}
-            value={uaListStr}
-            onChange={(e) => setUaListStr(e.target.value)}
-            placeholder="多个 User-Agent 用逗号分隔，留空则使用默认 UA"
-          />
-          <p className="admin-form__hint">每次请求随机选取一个 UA，降低被封概率</p>
-        </div>
-
-        <div className="admin-form__row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <div>
-            <label className="admin-form__label">列表页最小延时 (秒)</label>
-            <input
-              className="admin-form__input"
-              type="number"
-              step={0.1}
-              value={minPageDelay}
-              onChange={(e) => setMinPageDelay(Number(e.target.value))}
-            />
-          </div>
-          <div>
-            <label className="admin-form__label">列表页最大延时 (秒)</label>
-            <input
-              className="admin-form__input"
-              type="number"
-              step={0.1}
-              value={maxPageDelay}
-              onChange={(e) => setMaxPageDelay(Number(e.target.value))}
-            />
-          </div>
-        </div>
-
-        <div className="admin-form__row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <div>
-            <label className="admin-form__label">详情页最小延时 (秒)</label>
-            <input
-              className="admin-form__input"
-              type="number"
-              step={0.1}
-              value={minDetailDelay}
-              onChange={(e) => setMinDetailDelay(Number(e.target.value))}
-            />
-          </div>
-          <div>
-            <label className="admin-form__label">详情页最大延时 (秒)</label>
-            <input
-              className="admin-form__input"
-              type="number"
-              step={0.1}
-              value={maxDetailDelay}
-              onChange={(e) => setMaxDetailDelay(Number(e.target.value))}
-            />
-          </div>
-        </div>
-
-        <div className="admin-form__row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <div>
-            <label className="admin-form__label">最大重试次数</label>
-            <input
-              className="admin-form__input"
-              type="number"
-              value={maxRetries}
-              onChange={(e) => setMaxRetries(Number(e.target.value))}
-            />
-          </div>
-          <div>
-            <label className="admin-form__label">重试基础延时 (秒)</label>
-            <input
-              className="admin-form__input"
-              type="number"
-              step={0.1}
-              value={retryDelay}
-              onChange={(e) => setRetryDelay(Number(e.target.value))}
-            />
-          </div>
-        </div>
-
-        <div className="admin-form__row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <div>
-            <label className="admin-form__label">请求超时 (秒)</label>
-            <input
-              className="admin-form__input"
-              type="number"
-              value={requestTimeout}
-              onChange={(e) => setRequestTimeout(Number(e.target.value))}
-            />
-          </div>
-          <div>
-            <label className="admin-form__label">目标新增视频数</label>
-            <input
-              className="admin-form__input"
-              type="number"
-              value={targetNew}
-              onChange={(e) => setTargetNew(Number(e.target.value))}
-            />
-            <p className="admin-form__hint">每次爬虫任务的目标新增数</p>
-          </div>
-        </div>
-
-        <div className="admin-form__row">
-          <label className="admin-form__label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={extractMeta}
-              onChange={(e) => setExtractMeta(e.target.checked)}
-            />
-            提取详情页元数据 (views / likes / dislikes / author / tags / duration / description)
-          </label>
+          <p className="admin-form__hint">每次爬虫任务按分类优先级累计补到该数量。</p>
         </div>
 
         <div className="admin-form__actions" style={{ display: "flex", gap: 12, marginTop: 24 }}>
@@ -470,3 +393,4 @@ export function Spider91Page() {
     </div>
   );
 }
+
