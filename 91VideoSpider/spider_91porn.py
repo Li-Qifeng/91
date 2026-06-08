@@ -509,9 +509,10 @@ class Porn91Spider:
         """从详情页提取额外元数据。best-effort，失败不报错。"""
         meta = {}
 
-        # views — 正则 + soup selector 多重回退
+        # views — 正则 + soup selector 多重回退（适配 91porn 实际 HTML）
         view_val = None
         for pattern in [
+            r'Views:\s*<span[^>]*video-info-span[^>]*>([\d,]+)',
             r'class=["\']view-total["\'][^>]*>[\s\n]*([\d,]+)',
             r'class=["\']views?["\'][^>]*>[\s\n]*([\d,]+)',
             r'id=["\']view["\'][^>]*>[\s\n]*([\d,]+)',
@@ -525,10 +526,11 @@ class Porn91Spider:
                 except ValueError:
                     pass
         if view_val is None:
-            # soup fallback: 常见选择器
+            # soup fallback
             for sel in [
                 '.view-total', '.view-count', '.views', '#view',
                 '[class*="view"] span', '[class*="view"]',
+                'span.video-info-span',
             ]:
                 el = soup.select_one(sel)
                 if el:
@@ -564,25 +566,25 @@ class Porn91Spider:
 
         fav_val = _extract_int_by_patterns(
             html_text, soup,
-            [r'class=["\']favorite["\'][^>]*>[\s\n]*([\d,]+)', r'class=["\']fav["\'][^>]*>[\s\n]*([\d,]+)'],
-            ['.favorite', '.fav-count', '[class*="favorite"] span', '[class*="fav"]']
+            [r'Favorites:\s*<span[^>]*video-info-span[^>]*>([\d,]+)', r'class=["\']favorite["\'][^>]*>[\s\n]*([\d,]+)', r'class=["\']fav["\'][^>]*>[\s\n]*([\d,]+)'],
+            ['.favorite', '.fav-count', '[class*="favorite"] span', '[class*="fav"]', 'span.video-info-span']
         )
         if fav_val is not None:
             meta["favorites"] = fav_val
 
         like_val = _extract_int_by_patterns(
             html_text, soup,
-            [r'class=["\']like["\'][^>]*>[\s\n]*([\d,]+)', r'class=["\']upvote["\'][^>]*>[\s\n]*([\d,]+)',
+            [r'Point:\s*<span[^>]*video-info-span[^>]*>([\d,]+)', r'<div class="like"><div class="counter">([\d,]+)</div></div>', r'class=["\']like["\'][^>]*>[\s\n]*([\d,]+)', r'class=["\']upvote["\'][^>]*>[\s\n]*([\d,]+)',
              r'data-count=["\']([\d,]+)["\'][^>]*class=["\'].*?like'],
-            ['.like', '.like-count', '.upvote', '[class*="like"] span', '[data-count]']
+            ['.like .counter', '.like', '.like-count', '.upvote', '[class*="like"] span', '[data-count]']
         )
         if like_val is not None:
             meta["likes"] = like_val
 
         dislike_val = _extract_int_by_patterns(
             html_text, soup,
-            [r'class=["\']dislike["\'][^>]*>[\s\n]*([\d,]+)', r'class=["\']downvote["\'][^>]*>[\s\n]*([\d,]+)'],
-            ['.dislike', '.dislike-count', '.downvote', '[class*="dislike"] span']
+            [r'<div class="dislike"><div class="counter">([\d,]+)</div></div>', r'class=["\']dislike["\'][^>]*>[\s\n]*([\d,]+)', r'class=["\']downvote["\'][^>]*>[\s\n]*([\d,]+)'],
+            ['.dislike .counter', '.dislike', '.dislike-count', '.downvote', '[class*="dislike"] span']
         )
         if dislike_val is not None:
             meta["dislikes"] = dislike_val
@@ -613,23 +615,32 @@ class Porn91Spider:
 
         # duration — 优先从明确的选择器中提取，避免全局时间戳误匹配
         duration_val = None
-        for sel in [
-            '.video-duration', '.duration', '[class*="duration"]',
-            '.video-time', '.time-tag', '.video-length',
-        ]:
-            el = soup.select_one(sel)
-            if el:
-                txt = el.get_text(strip=True)
-                # HH:MM:SS
-                m = re.match(r'(\d{1,2}):(\d{2}):(\d{2})', txt)
-                if m:
-                    duration_val = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
-                    break
-                # MM:SS
-                m = re.match(r'(\d{1,2}):(\d{2})', txt)
-                if m:
-                    duration_val = int(m.group(1)) * 60 + int(m.group(2))
-                    break
+        # 91porn 实际结构: <span class="info"> Runtime: <span class="video-info-span">00:16:48</span></span>
+        runtime_m = re.search(r'Runtime:\s*<span[^>]*video-info-span[^>]*>(\d{1,2}):(\d{2}):(\d{2})', html_text, re.IGNORECASE)
+        if runtime_m:
+            duration_val = int(runtime_m.group(1)) * 3600 + int(runtime_m.group(2)) * 60 + int(runtime_m.group(3))
+        if duration_val is None:
+            runtime_m = re.search(r'Runtime:\s*<span[^>]*video-info-span[^>]*>(\d{1,2}):(\d{2})', html_text, re.IGNORECASE)
+            if runtime_m:
+                duration_val = int(runtime_m.group(1)) * 60 + int(runtime_m.group(2))
+        if duration_val is None:
+            for sel in [
+                '.video-duration', '.duration', '[class*="duration"]',
+                '.video-time', '.time-tag', '.video-length',
+            ]:
+                el = soup.select_one(sel)
+                if el:
+                    txt = el.get_text(strip=True)
+                    # HH:MM:SS
+                    m = re.match(r'(\d{1,2}):(\d{2}):(\d{2})', txt)
+                    if m:
+                        duration_val = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+                        break
+                    # MM:SS
+                    m = re.match(r'(\d{1,2}):(\d{2})', txt)
+                    if m:
+                        duration_val = int(m.group(1)) * 60 + int(m.group(2))
+                        break
         if duration_val is None:
             # 回退：从视频播放器附近找时长
             for sel in ['video', '.video-player', '.player']:
@@ -671,9 +682,17 @@ class Porn91Spider:
         if tags:
             meta["tags"] = tags
 
-        # 调试日志（仅在有提取到任何字段时输出）
+        # 调试日志（打印每个字段的实际值）
         if meta:
-            self.log(f"  [META] 提取字段: {list(meta.keys())}")
+            details = []
+            for k, v in meta.items():
+                val_str = str(v) if v is not None else "None"
+                if len(val_str) > 40:
+                    val_str = val_str[:37] + "..."
+                details.append(f"{k}={val_str}")
+            self.log(f"  [META] 提取成功: {'; '.join(details)}")
+        else:
+            self.log("  [META] 未提取到任何元数据")
 
         return meta
 
