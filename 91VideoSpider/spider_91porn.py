@@ -110,6 +110,35 @@ LIST_PARAMS = {
     "viewtype": "basic"
 }
 
+# 标题分词标签映射：键=标签名，值=标题中可触发该标签的关键词列表（不区分大小写）
+TITLE_TAG_PATTERNS = {
+    "双飞": ["双飞", "3P", "三人", "多人", "群交"],
+    "内射": ["内射", "中出", "灌精", "creampie"],
+    "黑丝": ["黑丝", "黑丝袜", "肉丝", "白丝", "丝袜"],
+    "技师": ["技师", "按摩", "spa", "推油"],
+    "空姐": ["空姐", "航空", "乘务"],
+    "护士": ["护士", "白衣天使"],
+    "教师": ["老师", "教师", "家教"],
+    "主播": ["主播", "网红", "直播"],
+    "绿帽": ["绿帽", "绿帽献妻", "单男", "换妻", "交换"],
+    "露出": ["露出", "露脸", "户外", "公共场合"],
+    "偷拍": ["偷拍", "暗拍"],
+    "颜射": ["颜射", "射脸", "口爆"],
+    "喷水": ["喷水", "潮吹", "squirt"],
+    "车震": ["车震", "车里", "车内"],
+    "办公室": ["办公室", "职场", "办公"],
+    "模特": ["模特"],
+    "秘书": ["秘书", "OL"],
+    "捆绑": ["捆绑", "调教"],
+    "骑乘": ["骑乘", "女上", "女上位"],
+    "后入": ["后入", "後入", "狗爬", "doggy"],
+    "口交": ["口交", "口爆", "深喉", "吞精", "blowjob"],
+    "人妻": ["人妻", "少妇", "熟女", "wife"],
+    "女大": ["女大", "大学生", "学生妹", "学妹"],
+    "奶子": ["巨乳", "大奶", "美乳", "爆乳"],
+    "臀": ["翘臀", "肥臀", "巨臀", "蜜桃臀", "大屁股"],
+}
+
 # 请求头 (模拟真实浏览器)
 HEADERS = {
     "User-Agent": (
@@ -460,7 +489,7 @@ class Porn91Spider:
         返回: {"video_url": "...", "source_id": "...", "title": "...",
                 "views": N, "favorites": N, "likes": N, "dislikes": N,
                 "author": "...", "addtime": "...", "tags": [...],
-                "duration": N, "description": "..."}
+                "duration": N}
         或空字典
         """
         result = {}
@@ -502,6 +531,12 @@ class Porn91Spider:
         if self.extract_meta and result.get("video_url"):
             meta = self._extract_detail_meta(soup, html)
             result.update(meta)
+            # 标题分词标签：与页面上提取到的 tags 合并去重
+            title_tags = self._extract_title_tags(result.get("title", ""))
+            existing_tags = result.get("tags", [])
+            merged = list(dict.fromkeys(existing_tags + title_tags))
+            if merged:
+                result["tags"] = merged
 
         return result
 
@@ -683,22 +718,6 @@ class Porn91Spider:
         if duration_val is not None:
             meta["duration"] = duration_val
 
-        # description — 91porn 实际结构: <div id="v_desc" class="more title">...</div>
-        desc_val = None
-        for sel in [
-            '#v_desc', 'div.more.title',
-            'div.video-description', 'div.description', 'p.description', '.video-desc',
-            '.video-info-description', '.info-description', '[class*="description"]',
-            '.video-detail .desc', '.video-summary', '.video-about',
-        ]:
-            el = soup.select_one(sel)
-            if el:
-                desc_val = html.unescape(el.get_text(strip=True))[:500]
-                if desc_val:
-                    break
-        if desc_val:
-            meta["description"] = desc_val
-
         # tags
         tags = []
         for a in soup.select('div.video-tags a, div.tags a, a.tag, .video-tag, [class*="tag"] a'):
@@ -721,6 +740,19 @@ class Porn91Spider:
             self.log("  [META] 未提取到任何元数据")
 
         return meta
+
+    def _extract_title_tags(self, title: str) -> list:
+        """根据标题分词提取标签，返回标签列表（去重、有序）。"""
+        if not title:
+            return []
+        lower_title = title.lower()
+        found = []
+        for label, keywords in TITLE_TAG_PATTERNS.items():
+            for kw in keywords:
+                if kw.lower() in lower_title:
+                    found.append(label)
+                    break
+        return found
 
     def _extract_detail_title(self, html_text: str) -> str:
         soup = BeautifulSoup(html_text, 'lxml')
@@ -887,7 +919,7 @@ class Porn91Spider:
                 if detail_info.get("title"):
                     video["title"] = detail_info["title"]
                 # merge 详情页元数据（best-effort）
-                for k in ["views", "favorites", "likes", "dislikes", "author", "addtime", "tags", "duration", "description"]:
+                for k in ["views", "favorites", "likes", "dislikes", "author", "addtime", "tags", "duration"]:
                     val = detail_info.get(k)
                     if val is not None and val != "":
                         video[k] = val
@@ -1060,7 +1092,7 @@ def main():
     parser.add_argument("--request-timeout", type=float, default=None,
                         help="单次请求超时（秒）")
     parser.add_argument("--extract-meta", action="store_true",
-                        help="提取详情页元数据 (views/likes/dislikes/author/tags/duration/description)")
+                        help="提取详情页元数据 (views/likes/dislikes/author/tags/duration)")
 
     args, _ = parser.parse_known_args()
     cli_out = sys.stderr if args.stream_output else sys.stdout
