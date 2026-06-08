@@ -117,7 +117,7 @@ export default function HomePage() {
 
       // 逐个加载分类视频
       sections.forEach((sec, idx) => {
-        fetchListing(1, CATEGORY_COUNT, { cat: sec.category, sort: "latest", includeTotal: false })
+        fetchListing(1, CATEGORY_COUNT, { cat: sec.category, sort: "views", includeTotal: false })
           .then((res) => {
             if (!active) return;
             setCategories((prev) => {
