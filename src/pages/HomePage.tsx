@@ -5,7 +5,7 @@ import { SearchPanel } from "@/components/SearchPanel";
 import { TagCloud } from "@/components/TagCloud";
 import { SectionHeader } from "@/components/SectionHeader";
 import { VideoGrid } from "@/components/VideoGrid";
-import { fetchHomeVideos, fetchListing, fetchCategories } from "@/data/videos";
+import { fetchHomeVideos, fetchListing } from "@/data/videos";
 import type { VideoItem } from "@/types";
 import { RefreshCw } from "lucide-react";
 
@@ -13,6 +13,19 @@ const DESKTOP_COUNT = 12;
 const MOBILE_COUNT = 8;
 const CATEGORY_COUNT = 6;
 const HOME_RECENT_KEY = "home.random.recentVideoIds";
+
+const CATEGORY_MAP: { key: string; label: string }[] = [
+  { key: "top", label: "本月Top" },
+  { key: "hot", label: "本月最热" },
+  { key: "ori", label: "91原创" },
+  { key: "long", label: "10分钟以上" },
+  { key: "longer", label: "20分钟以上" },
+  { key: "tf", label: "收藏最多" },
+  { key: "rf", label: "精华推荐" },
+  { key: "hd", label: "高清" },
+  { key: "md", label: "讨论最多" },
+  { key: "mf", label: "最多关注" },
+];
 const HOME_RECENT_LIMIT = 72;
 
 function useIsMobile() {
@@ -61,6 +74,7 @@ function rememberHomeVideos(items: VideoItem[]) {
 
 type CategorySection = {
   category: string;
+  label: string;
   videos: VideoItem[];
   loading: boolean;
 };
@@ -106,39 +120,38 @@ export default function HomePage() {
         });
     }
 
-    // 加载分类区块
-    fetchCategories().then((catList) => {
-      if (!active) return;
-      const sections: CategorySection[] = catList
-        .filter((c) => c.category && c.count > 0)
-        .slice(0, 6)
-        .map((c) => ({ category: c.category, videos: [], loading: true }));
-      setCategories(sections);
+    // 加载分类区块（固定 91porn 分类，逐个请求）
+    const sections: CategorySection[] = CATEGORY_MAP.map((c) => ({
+      category: c.key,
+      label: c.label,
+      videos: [],
+      loading: true,
+    }));
+    setCategories(sections);
 
-      // 逐个加载分类视频
-      sections.forEach((sec, idx) => {
-        fetchListing(1, CATEGORY_COUNT, { cat: sec.category, sort: "views", includeTotal: false })
-          .then((res) => {
-            if (!active) return;
-            setCategories((prev) => {
-              const next = [...prev];
-              if (next[idx]) {
-                next[idx] = { ...next[idx], videos: res.items, loading: false };
-              }
-              return next;
-            });
-          })
-          .catch(() => {
-            if (!active) return;
-            setCategories((prev) => {
-              const next = [...prev];
-              if (next[idx]) {
-                next[idx] = { ...next[idx], loading: false };
-              }
-              return next;
-            });
+    // 逐个加载分类视频
+    sections.forEach((sec, idx) => {
+      fetchListing(1, CATEGORY_COUNT, { cat: sec.category, sort: "views", includeTotal: false })
+        .then((res) => {
+          if (!active) return;
+          setCategories((prev) => {
+            const next = [...prev];
+            if (next[idx]) {
+              next[idx] = { ...next[idx], videos: res.items, loading: false };
+            }
+            return next;
           });
-      });
+        })
+        .catch(() => {
+          if (!active) return;
+          setCategories((prev) => {
+            const next = [...prev];
+            if (next[idx]) {
+              next[idx] = { ...next[idx], loading: false };
+            }
+            return next;
+          });
+        });
     });
 
     return () => { active = false; };
@@ -205,7 +218,7 @@ export default function HomePage() {
       {categories.map((sec) => (
         <div key={sec.category} className="container page-section">
           <SectionHeader
-            title={sec.category}
+            title={sec.label}
             extra={
               <a href={`/list?cat=${encodeURIComponent(sec.category)}`} style={{ fontSize: 12, color: "var(--accent)" }}>
                 查看更多 →
