@@ -594,16 +594,28 @@ class Porn91Spider:
         if dislike_val is not None:
             meta["dislikes"] = dislike_val
 
-        # author — 正则 + soup selector 多重回退
+        # author — 91porn 实际结构: <span class="title-yakov"><a href="..."><span class="title">作者名</span></a></span>
+        # 或中文: <span class="info">来自/From: </span> <span class="title-yakov">...
         author_val = None
-        author_m = re.search(r'class=["\']author["\'][^>]*>([^<]+)', html_text, re.IGNORECASE)
-        if author_m:
-            author_val = html.unescape(author_m.group(1).strip())
+        title_yakov = soup.select_one('span.title-yakov span.title')
+        if title_yakov:
+            # 只取直接文本，排除 VIP 图标等子标签
+            author_val = ''.join(title_yakov.find_all(string=True, recursive=False)).strip()
+        if not author_val:
+            # 回退：从相近的 .info 上下文找
+            for info_el in soup.select('span.info'):
+                txt = info_el.get_text(" ", strip=True).lower()
+                if 'from' in txt or '来自' in txt:
+                    # 找下一个兄弟元素
+                    nxt = info_el.find_next_sibling()
+                    if nxt:
+                        author_val = nxt.get_text(strip=True)
+                        if author_val:
+                            break
         if not author_val:
             for sel in [
-                'div.user-info a', 'a.username', 'span.username', '.video-author',
-                '.uploader-name', '.profile-name', '[class*="author"] a', '[class*="user"] a',
-                '.video-info .user', '.user-name', '.channel-name',
+                'a[href*="uprofile"] span', 'a[href*="uprofile"]', '.video-author',
+                '.uploader-name', '.profile-name', '.user-name', '.channel-name',
             ]:
                 el = soup.select_one(sel)
                 if el:
@@ -671,9 +683,10 @@ class Porn91Spider:
         if duration_val is not None:
             meta["duration"] = duration_val
 
-        # description
+        # description — 91porn 实际结构: <div id="v_desc" class="more title">...</div>
         desc_val = None
         for sel in [
+            '#v_desc', 'div.more.title',
             'div.video-description', 'div.description', 'p.description', '.video-desc',
             '.video-info-description', '.info-description', '[class*="description"]',
             '.video-detail .desc', '.video-summary', '.video-about',
