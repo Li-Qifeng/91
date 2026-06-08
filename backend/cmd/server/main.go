@@ -496,6 +496,9 @@ func (a *App) spider91Status(driveID string) (*spider91.CrawlJobStatus, []spider
 		return &spider91.CrawlJobStatus{State: "idle"}, []spider91.HistoryRecord{}, nil
 	}
 	status := c.Status()
+	if status.State == "" {
+		status.State = "idle"
+	}
 	history, err := c.History(20)
 	if err != nil {
 		return &status, []spider91.HistoryRecord{}, err

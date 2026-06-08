@@ -509,80 +509,171 @@ class Porn91Spider:
         """从详情页提取额外元数据。best-effort，失败不报错。"""
         meta = {}
 
-        # views — 多选择器回退
-        for pattern in [r'class=["\']view-total["\'][^>]*>(\d+)', r'id=["\']view["\'][^>]*>(\d+)',
-                        r'class=["\']views?["\'][^>]*>(\d+)', r'title=["\']Views["\'][^>]*>(\d+)']:
+        # views — 正则 + soup selector 多重回退
+        view_val = None
+        for pattern in [
+            r'class=["\']view-total["\'][^>]*>[\s\n]*([\d,]+)',
+            r'class=["\']views?["\'][^>]*>[\s\n]*([\d,]+)',
+            r'id=["\']view["\'][^>]*>[\s\n]*([\d,]+)',
+            r'title=["\']Views["\'][^>]*>[\s\n]*([\d,]+)',
+        ]:
             m = re.search(pattern, html_text, re.IGNORECASE)
             if m:
                 try:
-                    meta["views"] = int(m.group(1).replace(",", ""))
+                    view_val = int(m.group(1).replace(",", ""))
+                    break
                 except ValueError:
                     pass
-                break
-
-        # favorites / likes / dislikes
-        fav_m = re.search(r'class=["\']favorite["\'][^>]*>\s*(\d+)', html_text, re.IGNORECASE)
-        if fav_m:
-            try:
-                meta["favorites"] = int(fav_m.group(1).replace(",", ""))
-            except ValueError:
-                pass
-        like_m = re.search(r'class=["\']like["\'][^>]*>\s*(\d+)', html_text, re.IGNORECASE)
-        if like_m:
-            try:
-                meta["likes"] = int(like_m.group(1).replace(",", ""))
-            except ValueError:
-                pass
-        dislike_m = re.search(r'class=["\']dislike["\'][^>]*>\s*(\d+)', html_text, re.IGNORECASE)
-        if dislike_m:
-            try:
-                meta["dislikes"] = int(dislike_m.group(1).replace(",", ""))
-            except ValueError:
-                pass
-
-        # author
-        author_m = re.search(r'class=["\']author["\'][^>]*>([^<]+)', html_text, re.IGNORECASE)
-        if author_m:
-            meta["author"] = html.unescape(author_m.group(1).strip())
-        else:
-            # 备用: 从用户信息区提取
-            for sel in ['div.user-info a', 'a.username', 'span.username', '.video-author']:
+        if view_val is None:
+            # soup fallback: 常见选择器
+            for sel in [
+                '.view-total', '.view-count', '.views', '#view',
+                '[class*="view"] span', '[class*="view"]',
+            ]:
                 el = soup.select_one(sel)
                 if el:
-                    meta["author"] = html.unescape(el.get_text(strip=True))
-                    break
+                    txt = re.sub(r"[^\d,]", "", el.get_text(strip=True))
+                    if txt:
+                        try:
+                            view_val = int(txt.replace(",", ""))
+                            break
+                        except ValueError:
+                            pass
+        if view_val is not None:
+            meta["views"] = view_val
+
+        # favorites / likes / dislikes — 正则 + soup selector 多重回退
+        def _extract_int_by_patterns(text: str, soup: BeautifulSoup, regex_list, selector_list) -> int | None:
+            for pat in regex_list:
+                m = re.search(pat, text, re.IGNORECASE)
+                if m:
+                    try:
+                        return int(m.group(1).replace(",", ""))
+                    except ValueError:
+                        pass
+            for sel in selector_list:
+                el = soup.select_one(sel)
+                if el:
+                    txt = re.sub(r"[^\d,]", "", el.get_text(strip=True))
+                    if txt:
+                        try:
+                            return int(txt.replace(",", ""))
+                        except ValueError:
+                            pass
+            return None
+
+        fav_val = _extract_int_by_patterns(
+            html_text, soup,
+            [r'class=["\']favorite["\'][^>]*>[\s\n]*([\d,]+)', r'class=["\']fav["\'][^>]*>[\s\n]*([\d,]+)'],
+            ['.favorite', '.fav-count', '[class*="favorite"] span', '[class*="fav"]']
+        )
+        if fav_val is not None:
+            meta["favorites"] = fav_val
+
+        like_val = _extract_int_by_patterns(
+            html_text, soup,
+            [r'class=["\']like["\'][^>]*>[\s\n]*([\d,]+)', r'class=["\']upvote["\'][^>]*>[\s\n]*([\d,]+)',
+             r'data-count=["\']([\d,]+)["\'][^>]*class=["\'].*?like'],
+            ['.like', '.like-count', '.upvote', '[class*="like"] span', '[data-count]']
+        )
+        if like_val is not None:
+            meta["likes"] = like_val
+
+        dislike_val = _extract_int_by_patterns(
+            html_text, soup,
+            [r'class=["\']dislike["\'][^>]*>[\s\n]*([\d,]+)', r'class=["\']downvote["\'][^>]*>[\s\n]*([\d,]+)'],
+            ['.dislike', '.dislike-count', '.downvote', '[class*="dislike"] span']
+        )
+        if dislike_val is not None:
+            meta["dislikes"] = dislike_val
+
+        # author — 正则 + soup selector 多重回退
+        author_val = None
+        author_m = re.search(r'class=["\']author["\'][^>]*>([^<]+)', html_text, re.IGNORECASE)
+        if author_m:
+            author_val = html.unescape(author_m.group(1).strip())
+        if not author_val:
+            for sel in [
+                'div.user-info a', 'a.username', 'span.username', '.video-author',
+                '.uploader-name', '.profile-name', '[class*="author"] a', '[class*="user"] a',
+                '.video-info .user', '.user-name', '.channel-name',
+            ]:
+                el = soup.select_one(sel)
+                if el:
+                    author_val = html.unescape(el.get_text(strip=True))
+                    if author_val:
+                        break
+        if author_val:
+            meta["author"] = author_val
 
         # addtime
         addtime_m = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', html_text)
         if addtime_m:
             meta["addtime"] = addtime_m.group(1)
 
-        # duration — 从 HTML 文本中提取 HH:MM:SS 或 MM:SS
-        dur_m = re.search(r'(\d{1,2}):(\d{2}):(\d{2})', html_text)
-        if dur_m:
-            h, m, s = int(dur_m.group(1)), int(dur_m.group(2)), int(dur_m.group(3))
-            meta["duration"] = h * 3600 + m * 60 + s
-        else:
-            dur_m2 = re.search(r'(\d{1,2}):(\d{2})', html_text)
-            if dur_m2:
-                m, s = int(dur_m2.group(1)), int(dur_m2.group(2))
-                meta["duration"] = m * 60 + s
-
-        # description
-        for sel in ['div.video-description', 'div.description', 'p.description', '.video-desc']:
+        # duration — 优先从明确的选择器中提取，避免全局时间戳误匹配
+        duration_val = None
+        for sel in [
+            '.video-duration', '.duration', '[class*="duration"]',
+            '.video-time', '.time-tag', '.video-length',
+        ]:
             el = soup.select_one(sel)
             if el:
-                meta["description"] = html.unescape(el.get_text(strip=True))[:500]
-                break
+                txt = el.get_text(strip=True)
+                # HH:MM:SS
+                m = re.match(r'(\d{1,2}):(\d{2}):(\d{2})', txt)
+                if m:
+                    duration_val = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+                    break
+                # MM:SS
+                m = re.match(r'(\d{1,2}):(\d{2})', txt)
+                if m:
+                    duration_val = int(m.group(1)) * 60 + int(m.group(2))
+                    break
+        if duration_val is None:
+            # 回退：从视频播放器附近找时长
+            for sel in ['video', '.video-player', '.player']:
+                el = soup.select_one(sel)
+                if el:
+                    txt = el.get_text(strip=True)
+                    m = re.search(r'(\d{1,2}):(\d{2}):(\d{2})', txt)
+                    if m:
+                        duration_val = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+                        break
+                    m = re.search(r'(\d{1,2}):(\d{2})', txt)
+                    if m:
+                        duration_val = int(m.group(1)) * 60 + int(m.group(2))
+                        break
+        if duration_val is not None:
+            meta["duration"] = duration_val
+
+        # description
+        desc_val = None
+        for sel in [
+            'div.video-description', 'div.description', 'p.description', '.video-desc',
+            '.video-info-description', '.info-description', '[class*="description"]',
+            '.video-detail .desc', '.video-summary', '.video-about',
+        ]:
+            el = soup.select_one(sel)
+            if el:
+                desc_val = html.unescape(el.get_text(strip=True))[:500]
+                if desc_val:
+                    break
+        if desc_val:
+            meta["description"] = desc_val
 
         # tags
         tags = []
-        for a in soup.select('div.video-tags a, div.tags a, a.tag'):
+        for a in soup.select('div.video-tags a, div.tags a, a.tag, .video-tag, [class*="tag"] a'):
             t = a.get_text(strip=True)
-            if t and t not in tags:
+            if t and t not in tags and len(t) < 50:
                 tags.append(t)
         if tags:
             meta["tags"] = tags
+
+        # 调试日志（仅在有提取到任何字段时输出）
+        if meta:
+            self.log(f"  [META] 提取字段: {list(meta.keys())}")
 
         return meta
 
@@ -752,8 +843,9 @@ class Porn91Spider:
                     video["title"] = detail_info["title"]
                 # merge 详情页元数据（best-effort）
                 for k in ["views", "favorites", "likes", "dislikes", "author", "addtime", "tags", "duration", "description"]:
-                    if k in detail_info and detail_info[k]:
-                        video[k] = detail_info[k]
+                    val = detail_info.get(k)
+                    if val is not None and val != "":
+                        video[k] = val
                 list_source_id = video.get("source_id", "")
                 detail_source_id = detail_info.get("source_id", "")
                 if list_source_id and detail_source_id and list_source_id != detail_source_id:
