@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useToast } from "./ToastContext";
 import * as api from "./api";
-import { Globe, Save, Play, Activity, Clock, CheckCircle, XCircle, SkipForward, Loader } from "lucide-react";
+import { Globe, Save, Play, Activity, Clock, CheckCircle, XCircle, Loader } from "lucide-react";
 
 const CATEGORIES: { key: string; label: string }[] = [
   { key: "top", label: "本月Top" },

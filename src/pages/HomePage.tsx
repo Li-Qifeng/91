@@ -71,7 +71,6 @@ export default function HomePage() {
   const [rankingLoading, setRankingLoading] = useState(cachedRanking === null);
   const [latestLoading, setLatestLoading] = useState(cachedLatest === null);
   const [categories, setCategories] = useState<CategorySection[]>([]);
-  const [catsLoading, setCatsLoading] = useState(true);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -108,7 +107,6 @@ export default function HomePage() {
     }
 
     // 加载分类区块
-    setCatsLoading(true);
     fetchCategories().then((catList) => {
       if (!active) return;
       const sections: CategorySection[] = catList
@@ -141,8 +139,6 @@ export default function HomePage() {
             });
           });
       });
-    }).finally(() => {
-      if (active) setCatsLoading(false);
     });
 
     return () => { active = false; };

@@ -15,7 +15,6 @@ import {
   updateVideoTags,
 } from "@/data/videos";
 import type { TagItem, VideoDetail, VideoItem } from "@/types";
-import { RefreshCw } from "lucide-react";
 
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
