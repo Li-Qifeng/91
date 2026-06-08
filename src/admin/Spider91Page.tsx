@@ -34,6 +34,7 @@ export function Spider91Page() {
 
   const [categories, setCategories] = useState<string[]>(["top"]);
   const [targetNew, setTargetNew] = useState(15);
+  const [cronHour, setCronHour] = useState(1);
 
   useEffect(() => {
     loadSettings();
@@ -73,6 +74,9 @@ export function Spider91Page() {
         setCategories([cfg.category]);
       }
       if (s.spider91TargetNew > 0) setTargetNew(s.spider91TargetNew);
+      if (typeof s.nightlyCronHour === "number" && s.nightlyCronHour >= 0 && s.nightlyCronHour <= 23) {
+        setCronHour(s.nightlyCronHour);
+      }
     } catch {
       show("加载设置失败", "error");
     } finally {
@@ -106,6 +110,7 @@ export function Spider91Page() {
       await api.updateSettings({
         spider91Config: cfg,
         spider91TargetNew: targetNew,
+        nightlyCronHour: cronHour,
       });
       show("保存成功", "success");
     } catch {
@@ -371,6 +376,20 @@ export function Spider91Page() {
             onChange={(e) => setTargetNew(Number(e.target.value))}
           />
           <p className="admin-form__hint">每次爬虫任务按分类优先级累计补到该数量。</p>
+        </div>
+
+        <div className="admin-form__row">
+          <label className="admin-form__label">定时触发时间</label>
+          <input
+            className="admin-form__input"
+            type="number"
+            min={0}
+            max={23}
+            value={cronHour}
+            onChange={(e) => setCronHour(Math.max(0, Math.min(23, Number(e.target.value))))}
+            style={{ width: 120 }}
+          />
+          <p className="admin-form__hint">每天几点自动触发爬虫（0–23，默认 1 即凌晨 01:00）。修改后保存立即生效，无需重启。</p>
         </div>
 
         <div className="admin-form__actions" style={{ display: "flex", gap: 12, marginTop: 24 }}>

@@ -1151,6 +1151,7 @@ type settingsDTO struct {
 	Spider91TargetNew     int             `json:"spider91TargetNew"`
 	Spider91Config        json.RawMessage `json:"spider91Config,omitempty"`
 	Spider91WorkDir       string          `json:"spider91WorkDir"`
+	NightlyCronHour       int             `json:"nightlyCronHour"`
 }
 
 func (a *AdminServer) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -1169,6 +1170,7 @@ func (a *AdminServer) handleGetSettings(w http.ResponseWriter, r *http.Request) 
 		Spider91UploadDriveID: spider91UploadID,
 		Spider91TargetNew:     15,
 		Spider91WorkDir:       "",
+		NightlyCronHour:       1,
 	}
 	// 从 catalog settings 读取 spider91 配置
 	if a.Catalog != nil {
@@ -1182,6 +1184,11 @@ func (a *AdminServer) handleGetSettings(w http.ResponseWriter, r *http.Request) 
 		}
 		if v, err := a.Catalog.GetSetting(r.Context(), "spider91.workdir", ""); err == nil {
 			resp.Spider91WorkDir = v
+		}
+		if v, err := a.Catalog.GetSetting(r.Context(), "nightly.cron_hour", "1"); err == nil {
+			if n, _ := strconv.Atoi(v); n >= 0 && n <= 23 {
+				resp.NightlyCronHour = n
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -1267,6 +1274,12 @@ func (a *AdminServer) handlePutSettings(w http.ResponseWriter, r *http.Request) 
 				_ = a.Catalog.SetSetting(r.Context(), "spider91.workdir", wd)
 			}
 		}
+		if v, ok := raw["nightlyCronHour"]; ok {
+			var n int
+			if err := json.Unmarshal(v, &n); err == nil && n >= 0 && n <= 23 {
+				_ = a.Catalog.SetSetting(r.Context(), "nightly.cron_hour", fmt.Sprintf("%d", n))
+			}
+		}
 	}
 
 	// 回显当前值
@@ -1288,6 +1301,11 @@ func (a *AdminServer) handlePutSettings(w http.ResponseWriter, r *http.Request) 
 		}
 		if v, err := a.Catalog.GetSetting(r.Context(), "spider91.workdir", ""); err == nil {
 			resp.Spider91WorkDir = v
+		}
+		if v, err := a.Catalog.GetSetting(r.Context(), "nightly.cron_hour", "1"); err == nil {
+			if n, _ := strconv.Atoi(v); n >= 0 && n <= 23 {
+				resp.NightlyCronHour = n
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

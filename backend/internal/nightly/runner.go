@@ -32,6 +32,7 @@ package nightly
 import (
 	"context"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -138,7 +139,7 @@ func New(cfg Config) *Runner {
 func (r *Runner) Run(ctx context.Context) {
 	t := time.NewTicker(pollInterval)
 	defer t.Stop()
-	log.Printf("[nightly] runner started; cron_hour=%d", r.cfg.CronHour)
+	log.Printf("[nightly] runner started; cron_hour=%d", r.effectiveCronHour())
 	for {
 		select {
 		case <-ctx.Done():
@@ -226,9 +227,23 @@ func (r *Runner) Status() Status {
 }
 
 // tryNaturalRun checks the cron decision and runs the pipeline if due today.
+func (r *Runner) effectiveCronHour() int {
+	if r.cfg.Settings != nil {
+		if v, err := r.cfg.Settings.GetSetting(context.Background(), "nightly.cron_hour", "1"); err == nil {
+			if n, _ := strconv.Atoi(v); n >= 0 && n <= 23 {
+				return n
+			}
+		}
+	}
+	if r.cfg.CronHour < 0 || r.cfg.CronHour > 23 {
+		return 1
+	}
+	return r.cfg.CronHour
+}
+
 func (r *Runner) tryNaturalRun(ctx context.Context) {
 	now := r.cfg.Now()
-	if now.Hour() != r.cfg.CronHour {
+	if now.Hour() != r.effectiveCronHour() {
 		return
 	}
 	last, err := r.readLastRunDate(ctx)

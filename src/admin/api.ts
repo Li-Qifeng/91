@@ -420,6 +420,7 @@ export type Settings = {
   spider91TargetNew: number;
   spider91Config?: Spider91Config;
   spider91WorkDir: string;
+  nightlyCronHour: number;
 };
 
 export type Spider91Config = {
