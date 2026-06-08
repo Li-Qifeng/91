@@ -335,7 +335,7 @@ func (s *Server) handleVideoDetail(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	related := s.pickRelatedVideos(r.Context(), v, 6)
+	related := s.pickRelatedVideos(r.Context(), v, 6, nil)
 	dto := mapVideo(v)
 	if d, err := s.Catalog.GetDrive(r.Context(), v.DriveID); err == nil {
 		dto.SourceLabel = driveKindLabel(d.Kind)
@@ -373,7 +373,13 @@ func (s *Server) handleVideoRelated(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, sql.ErrNoRows)
 		return
 	}
-	related := s.pickRelatedVideos(r.Context(), v, 6)
+	extraSeen := make(map[string]struct{})
+	for _, eid := range strings.Split(r.URL.Query().Get("exclude"), ",") {
+		if eid = strings.TrimSpace(eid); eid != "" {
+			extraSeen[eid] = struct{}{}
+		}
+	}
+	related := s.pickRelatedVideos(r.Context(), v, 6, extraSeen)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, mapVideos(related))
 }
@@ -381,7 +387,7 @@ func (s *Server) handleVideoRelated(w http.ResponseWriter, r *http.Request) {
 // pickRelatedVideos 选 total 个推荐视频。
 // 一半来自同标签命中，剩下用全库随机补齐；两段都优先取已有封面的视频，
 // 不够时再回退到未生成封面的候选。结果不会重复，也不会包含当前视频。
-func (s *Server) pickRelatedVideos(ctx context.Context, current *catalog.Video, total int) []*catalog.Video {
+func (s *Server) pickRelatedVideos(ctx context.Context, current *catalog.Video, total int, extraSeen map[string]struct{}) []*catalog.Video {
 	if total <= 0 || current == nil {
 		return nil
 	}
@@ -392,6 +398,9 @@ func (s *Server) pickRelatedVideos(ctx context.Context, current *catalog.Video, 
 
 	picked := make([]*catalog.Video, 0, total)
 	seen := map[string]struct{}{current.ID: {}}
+	for id := range extraSeen {
+		seen[id] = struct{}{}
+	}
 
 	// 1) 同标签候选：先取已有封面的候选，数量不够再从全部候选里补。
 	if tagQuota > 0 && len(current.Tags) > 0 {

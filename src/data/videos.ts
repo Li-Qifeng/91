@@ -35,8 +35,13 @@ export function fetchVideoDetail(id: string): Promise<VideoDetail | null> {
   );
 }
 
-export function fetchRelatedVideos(id: string): Promise<VideoItem[]> {
-  return apiGet<VideoItem[]>(`/api/video/${encodeURIComponent(id)}/related`).catch(
+export function fetchRelatedVideos(id: string, exclude?: string[]): Promise<VideoItem[]> {
+  const qs = new URLSearchParams();
+  if (exclude && exclude.length > 0) {
+    qs.set("exclude", exclude.join(","));
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiGet<VideoItem[]>(`/api/video/${encodeURIComponent(id)}/related${suffix}`).catch(
     () => []
   );
 }

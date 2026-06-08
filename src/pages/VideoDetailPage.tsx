@@ -26,6 +26,7 @@ export default function VideoDetailPage() {
   const [hideSaving, setHideSaving] = useState(false);
   const [relatedVideos, setRelatedVideos] = useState<VideoItem[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+  const [seenRelatedIds, setSeenRelatedIds] = useState<Set<string>>(new Set());
   const detailTopRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -37,6 +38,11 @@ export default function VideoDetailPage() {
       if (!active) return;
       setDetail(d);
       setRelatedVideos(d?.relatedVideos ?? []);
+      // 初始化已看过的推荐 ID（含当前视频 + 初始推荐）
+      const initialSeen = new Set<string>();
+      if (id) initialSeen.add(id);
+      d?.relatedVideos?.forEach((v) => initialSeen.add(v.id));
+      setSeenRelatedIds(initialSeen);
       setTags(tagList);
       setLoading(false);
       document.title = d ? `${d.title} · 91` : "视频不存在";
@@ -90,8 +96,22 @@ export default function VideoDetailPage() {
     if (!id || relatedLoading) return;
     setRelatedLoading(true);
     try {
-      const items = await fetchRelatedVideos(id);
-      setRelatedVideos(items);
+      const exclude = Array.from(seenRelatedIds);
+      let items = await fetchRelatedVideos(id, exclude);
+      if (items.length === 0 && exclude.length > 1) {
+        // 排除太多导致无结果 → 重置 seen 后重试
+        const resetSeen = new Set<string>([id]);
+        setSeenRelatedIds(resetSeen);
+        items = await fetchRelatedVideos(id, Array.from(resetSeen));
+      }
+      if (items.length > 0) {
+        setRelatedVideos(items);
+        setSeenRelatedIds((prev) => {
+          const next = new Set(prev);
+          items.forEach((v) => next.add(v.id));
+          return next;
+        });
+      }
     } finally {
       setRelatedLoading(false);
     }
