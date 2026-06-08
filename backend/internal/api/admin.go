@@ -909,6 +909,8 @@ func (a *AdminServer) handleAdminListVideos(w http.ResponseWriter, r *http.Reque
 	items, total, err := a.Catalog.ListVideos(r.Context(), catalog.ListParams{
 		Keyword:  q.Get("keyword"),
 		DriveID:  q.Get("driveId"),
+		Category: q.Get("category"),
+		Status:   q.Get("status"),
 		Sort:     q.Get("sort"),
 		Page:     page,
 		PageSize: size,

@@ -370,6 +370,7 @@ type spiderVideoEntry struct {
 	Tags        []string `json:"tags"`
 	Duration    int      `json:"duration"`
 	Description string   `json:"description"`
+	Category    string   `json:"category"`
 }
 
 // RunOnce 执行一次"跑爬虫 → 下载 → 入库"流程：
@@ -776,6 +777,7 @@ func (c *Crawler) processOne(ctx context.Context, videoID string, item spiderVid
 		Title:           title,
 		Author:          author,
 		Tags:            tags,
+		Category:        item.Category,
 		DurationSeconds: item.Duration,
 		Ext:             strings.TrimPrefix(videoExt, "."),
 		Quality:         "HD",

@@ -989,6 +989,7 @@ type ListParams struct {
 	DriveID               string
 	Tag                   string
 	Category              string
+	Status                string // preview_status: pending | ready | failed
 	Sort                  string // latest | hot | week | long
 	ThumbnailReadyOnly    bool
 	PreferReadyThumbnails bool
@@ -1023,6 +1024,10 @@ func (c *Catalog) ListVideos(ctx context.Context, p ListParams) ([]*Video, int, 
 	if p.Category != "" && p.Category != "all" {
 		where = append(where, "category = ?")
 		args = append(args, p.Category)
+	}
+	if p.Status != "" && p.Status != "all" {
+		where = append(where, "preview_status = ?")
+		args = append(args, p.Status)
 	}
 	if p.ThumbnailReadyOnly {
 		where = append(where, "COALESCE(thumbnail_url, '') != ''")

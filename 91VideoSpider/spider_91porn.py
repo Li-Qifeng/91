@@ -455,7 +455,8 @@ class Porn91Spider:
                 "detail_url": detail_url,
                 "thumb_url": thumb_url,
                 "viewkey": viewkey,
-                "source_id": source_id
+                "source_id": source_id,
+                "category": self.list_category,
             })
 
         return videos
