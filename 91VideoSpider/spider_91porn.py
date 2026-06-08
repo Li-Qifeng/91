@@ -509,38 +509,39 @@ class Porn91Spider:
         """从详情页提取额外元数据。best-effort，失败不报错。"""
         meta = {}
 
-        # views — 正则 + soup selector 多重回退（适配 91porn 实际 HTML）
+        # views — 优先从 <span class="info"> Views: <span class="video-info-span">N</span></span> 提取
         view_val = None
-        for pattern in [
-            r'Views:\s*<span[^>]*video-info-span[^>]*>([\d,]+)',
-            r'class=["\']view-total["\'][^>]*>[\s\n]*([\d,]+)',
-            r'class=["\']views?["\'][^>]*>[\s\n]*([\d,]+)',
-            r'id=["\']view["\'][^>]*>[\s\n]*([\d,]+)',
-            r'title=["\']Views["\'][^>]*>[\s\n]*([\d,]+)',
-        ]:
-            m = re.search(pattern, html_text, re.IGNORECASE)
+        for info_el in soup.select('span.info'):
+            txt = info_el.get_text(" ", strip=True)
+            m = re.search(r'Views:\s*([\d,]+)', txt, re.IGNORECASE)
             if m:
                 try:
                     view_val = int(m.group(1).replace(",", ""))
+                    if self.stream_output:
+                        self.log(f"  [META:views] 从 .info 提取: {view_val}")
                     break
                 except ValueError:
                     pass
         if view_val is None:
-            # soup fallback
-            for sel in [
-                '.view-total', '.view-count', '.views', '#view',
-                '[class*="view"] span', '[class*="view"]',
-                'span.video-info-span',
-            ]:
-                el = soup.select_one(sel)
-                if el:
-                    txt = re.sub(r"[^\d,]", "", el.get_text(strip=True))
-                    if txt:
+            # 回退：全局正则（但需限制匹配位置，排除 script/style）
+            body = soup.find('body')
+            if body:
+                body_text = str(body)
+                for pattern in [
+                    r'Views:\s*<span[^>]*video-info-span[^>]*>([\d,]+)',
+                    r'class=["\']view-total["\'][^>]*>[\s\n]*([\d,]+)',
+                ]:
+                    m = re.search(pattern, body_text, re.IGNORECASE)
+                    if m:
                         try:
-                            view_val = int(txt.replace(",", ""))
+                            view_val = int(m.group(1).replace(",", ""))
+                            if self.stream_output:
+                                self.log(f"  [META:views] 从 body 正则提取: {view_val}")
                             break
                         except ValueError:
                             pass
+        if view_val is None and self.stream_output:
+            self.log("  [META:views] 未找到")
         if view_val is not None:
             meta["views"] = view_val
 
