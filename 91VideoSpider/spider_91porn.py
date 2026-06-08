@@ -509,17 +509,21 @@ class Porn91Spider:
         """从详情页提取额外元数据。best-effort，失败不报错。"""
         meta = {}
 
-        # views — 优先从 <span class="info"> Views: <span class="video-info-span">N</span></span> 提取
+        # views — 优先从 <span class="info"> 中提取（适配中英文）
         view_val = None
         for info_el in soup.select('span.info'):
-            txt = info_el.get_text(" ", strip=True)
-            m = re.search(r'Views:\s*([\d,]+)', txt, re.IGNORECASE)
+            txt = info_el.get_text(" ", strip=True).lower()
+            # 匹配 Views: / 热度: / 浏览量: / 热度等中英文标签
+            m = re.search(r'(views|热度|浏览量|浏览数):?\s*([\d,]+)', txt)
             if m:
                 try:
-                    view_val = int(m.group(1).replace(",", ""))
-                    if self.stream_output:
-                        self.log(f"  [META:views] 从 .info 提取: {view_val}")
-                    break
+                    val = int(m.group(2).replace(",", ""))
+                    # 合理性校验：views 超过 10 亿视为异常（推荐视频/广告的大数字）
+                    if 0 <= val <= 1_000_000_000:
+                        view_val = val
+                        if self.stream_output:
+                            self.log(f"  [META:views] 从 .info 提取: {view_val}")
+                        break
                 except ValueError:
                     pass
         if view_val is None:
@@ -528,13 +532,13 @@ class Porn91Spider:
             if body:
                 body_text = str(body)
                 for pattern in [
-                    r'Views:\s*<span[^>]*video-info-span[^>]*>([\d,]+)',
+                    r'(Views|热度|浏览量|浏览数):\s*<span[^>]*video-info-span[^>]*>([\d,]+)',
                     r'class=["\']view-total["\'][^>]*>[\s\n]*([\d,]+)',
                 ]:
                     m = re.search(pattern, body_text, re.IGNORECASE)
                     if m:
                         try:
-                            view_val = int(m.group(1).replace(",", ""))
+                            view_val = int(m.group(2).replace(",", ""))
                             if self.stream_output:
                                 self.log(f"  [META:views] 从 body 正则提取: {view_val}")
                             break
@@ -616,14 +620,22 @@ class Porn91Spider:
 
         # duration — 优先从明确的选择器中提取，避免全局时间戳误匹配
         duration_val = None
-        # 91porn 实际结构: <span class="info"> Runtime: <span class="video-info-span">00:16:48</span></span>
-        runtime_m = re.search(r'Runtime:\s*<span[^>]*video-info-span[^>]*>(\d{1,2}):(\d{2}):(\d{2})', html_text, re.IGNORECASE)
-        if runtime_m:
-            duration_val = int(runtime_m.group(1)) * 3600 + int(runtime_m.group(2)) * 60 + int(runtime_m.group(3))
-        if duration_val is None:
-            runtime_m = re.search(r'Runtime:\s*<span[^>]*video-info-span[^>]*>(\d{1,2}):(\d{2})', html_text, re.IGNORECASE)
-            if runtime_m:
-                duration_val = int(runtime_m.group(1)) * 60 + int(runtime_m.group(2))
+        # 91porn 实际结构（中英文）: <span class="info"> Runtime/时长: <span class="video-info-span">00:16:48</span></span>
+        for pattern in [
+            r'(Runtime|时长|Duration):?\s*<span[^>]*video-info-span[^>]*>(\d{1,2}):(\d{2}):(\d{2})',
+            r'(Runtime|时长|Duration):?\s*<span[^>]*video-info-span[^>]*>(\d{1,2}):(\d{2})',
+        ]:
+            m = re.search(pattern, html_text, re.IGNORECASE)
+            if m:
+                try:
+                    groups = m.groups()
+                    if len(groups) == 4:  # HH:MM:SS
+                        duration_val = int(groups[1]) * 3600 + int(groups[2]) * 60 + int(groups[3])
+                    elif len(groups) == 3:  # MM:SS
+                        duration_val = int(groups[1]) * 60 + int(groups[2])
+                    break
+                except (ValueError, IndexError):
+                    pass
         if duration_val is None:
             for sel in [
                 '.video-duration', '.duration', '[class*="duration"]',
