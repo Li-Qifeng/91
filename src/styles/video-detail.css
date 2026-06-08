@@ -881,6 +881,25 @@
   text-transform: none;
 }
 
+.vd-info__source {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.vd-info__source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+
+.vd-info__source-link:hover {
+  text-decoration: underline;
+}
+
 /* Tags block */
 .vd-info__tags {
   padding: var(--space-5);

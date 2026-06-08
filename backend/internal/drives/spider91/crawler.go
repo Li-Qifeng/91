@@ -408,7 +408,6 @@ func (c *Crawler) RunOnce(ctx context.Context, targetNew int) (*CrawlResult, err
 	}
 
 	result := &CrawlResult{TargetNew: targetNew, StartedAt: time.Now()}
-	defer func() { result.FinishedAt = time.Now() }()
 
 	// 初始化实时状态
 	driveID := c.cfg.Driver.ID()
@@ -423,6 +422,7 @@ func (c *Crawler) RunOnce(ctx context.Context, targetNew int) (*CrawlResult, err
 
 	// 状态归档 helper：在 defer 中把最终结果写入 history.jsonl
 	defer func() {
+		result.FinishedAt = time.Now()
 		state := "done"
 		if runErr := recover(); runErr != nil {
 			state = "error"
@@ -438,13 +438,13 @@ func (c *Crawler) RunOnce(ctx context.Context, targetNew int) (*CrawlResult, err
 		c.status.NewVideos = result.NewVideos
 		c.status.Skipped = result.Skipped
 		c.status.Failed = result.Failed
-		c.statusMu.Unlock()
-
 		rec := HistoryRecord{
 			CrawlJobStatus: c.status,
 			OutputJSON:     result.OutputJSON,
 			SeenFile:       result.SeenFile,
 		}
+		c.statusMu.Unlock()
+
 		if err := c.appendHistory(rec); err != nil {
 			log.Printf("[spider91] drive=%s append history: %v", driveID, err)
 		}

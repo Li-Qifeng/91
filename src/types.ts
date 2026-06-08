@@ -48,6 +48,7 @@ export type VideoDetail = VideoItem & {
   videoSrc: string;
   poster: string;
   description: string;
+  sourceUrl?: string;
   embedUrl: string;
   points?: number;
   authorProfile: AuthorProfile;

@@ -867,6 +867,7 @@ func TestHandleVideoDetailIncludesDriveKindLabel(t *testing.T) {
 		DriveID:     "drive-onedrive",
 		FileID:      "file-1",
 		Title:       "Video",
+		SourceUrl:   "https://example.com/source-video",
 		PublishedAt: now,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -887,6 +888,9 @@ func TestHandleVideoDetailIncludesDriveKindLabel(t *testing.T) {
 	}
 	if got.SourceLabel != "OneDrive" {
 		t.Fatalf("sourceLabel = %q, want OneDrive", got.SourceLabel)
+	}
+	if got.SourceURL != "https://example.com/source-video" {
+		t.Fatalf("sourceUrl = %q, want source URL", got.SourceURL)
 	}
 }
 

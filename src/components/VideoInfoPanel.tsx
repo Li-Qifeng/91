@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Pencil, Tag, X } from "lucide-react";
+import { Pencil, Tag, X, ExternalLink } from "lucide-react";
 import type { TagItem, VideoDetail } from "@/types";
 
 type Props = {
@@ -93,6 +93,20 @@ export function VideoInfoPanel({
             )}
           </div>
           <p className="vd-info__desc-text">{description}</p>
+        </div>
+      )}
+
+      {video.sourceUrl && (
+        <div className="vd-info__source">
+          <a
+            href={video.sourceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="vd-info__source-link"
+          >
+            <ExternalLink size={14} />
+            原视频链接
+          </a>
         </div>
       )}
 
