@@ -322,12 +322,12 @@ func (c *Crawler) History(topN int) ([]HistoryRecord, error) {
 	}
 	path := c.historyPath()
 	if path == "" {
-		return nil, nil
+		return []HistoryRecord{}, nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return []HistoryRecord{}, nil
 		}
 		return nil, err
 	}

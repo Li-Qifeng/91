@@ -493,12 +493,12 @@ func (a *App) spider91Status(driveID string) (*spider91.CrawlJobStatus, []spider
 	a.mu.Unlock()
 	if c == nil {
 		// 没有 spider91 drive 时返回 idle
-		return &spider91.CrawlJobStatus{State: "idle"}, nil, nil
+		return &spider91.CrawlJobStatus{State: "idle"}, []spider91.HistoryRecord{}, nil
 	}
 	status := c.Status()
 	history, err := c.History(20)
 	if err != nil {
-		return &status, nil, err
+		return &status, []spider91.HistoryRecord{}, err
 	}
 	return &status, history, nil
 }
