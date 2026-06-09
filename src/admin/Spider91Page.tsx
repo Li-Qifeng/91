@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useToast } from "./ToastContext";
 import * as api from "./api";
-import { Globe, Save, Play, Activity, Clock, CheckCircle, XCircle, Loader, ChevronUp, ChevronDown } from "lucide-react";
+import { Globe, Save, Play, Activity, Clock, CheckCircle, XCircle, Loader, ChevronUp, ChevronDown, ChevronRight, ChevronDown as ChevronDownIcon } from "lucide-react";
 
 const CATEGORIES: { key: string; label: string }[] = [
   { key: "top", label: "本月Top" },
@@ -35,6 +35,11 @@ export function Spider91Page() {
   const [categories, setCategories] = useState<string[]>(["top"]);
   const [targetNew, setTargetNew] = useState(15);
   const [cronHour, setCronHour] = useState(1);
+
+  // 历史记录展开详情
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [detailMap, setDetailMap] = useState<Record<number, api.Spider91HistoryDetail>>({});
+  const [detailLoading, setDetailLoading] = useState<number | null>(null);
 
   useEffect(() => {
     loadSettings();
@@ -132,6 +137,24 @@ export function Spider91Page() {
     }
   }
 
+  async function toggleExpand(idx: number, outputJson?: string) {
+    if (expandedIdx === idx) {
+      setExpandedIdx(null);
+      return;
+    }
+    setExpandedIdx(idx);
+    if (!outputJson || detailMap[idx]) return;
+    setDetailLoading(idx);
+    try {
+      const detail = await api.getSpider91HistoryDetail(outputJson);
+      setDetailMap((prev) => ({ ...prev, [idx]: detail }));
+    } catch {
+      show("加载详情失败", "error");
+    } finally {
+      setDetailLoading(null);
+    }
+  }
+
   const state = status?.state ?? "idle";
   const isRunning = state === "running";
 
@@ -147,6 +170,14 @@ export function Spider91Page() {
       </div>
     );
   }
+
+  // 按实际优先级顺序渲染：已选中的按 categories 数组顺序排前面，未选中的按原始顺序排后面
+  const sortedCategories = [
+    ...CATEGORIES.filter((c) => categories.includes(c.key)).sort(
+      (a, b) => categories.indexOf(a.key) - categories.indexOf(b.key)
+    ),
+    ...CATEGORIES.filter((c) => !categories.includes(c.key)),
+  ];
 
   return (
     <div className="admin-page">
@@ -279,24 +310,82 @@ export function Spider91Page() {
               </thead>
               <tbody>
                 {history.map((rec, idx) => (
-                  <tr key={idx}>
-                    <td>
-                      {rec.state === "done" ? (
-                        <CheckCircle size={14} color="#22c55e" />
-                      ) : rec.state === "error" ? (
-                        <XCircle size={14} color="#ef4444" />
-                      ) : (
-                        <Activity size={14} color="var(--muted-fg)" />
-                      )}
-                    </td>
-                    <td>{rec.targetNew}</td>
-                    <td>{rec.progress}</td>
-                    <td>{rec.newVideos}</td>
-                    <td>{rec.skipped}</td>
-                    <td>{rec.failed}</td>
-                    <td>{fmtDate(rec.startedAt)}</td>
-                    <td>{fmtDate(rec.finishedAt)}</td>
-                  </tr>
+                  <>
+                    <tr
+                      key={idx}
+                      style={{ cursor: rec.outputJson ? "pointer" : "default" }}
+                      onClick={() => rec.outputJson && toggleExpand(idx, rec.outputJson)}
+                    >
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {rec.outputJson && (
+                            expandedIdx === idx ? (
+                              <ChevronDownIcon size={14} color="var(--muted-fg)" />
+                            ) : (
+                              <ChevronRight size={14} color="var(--muted-fg)" />
+                            )
+                          )}
+                          {rec.state === "done" ? (
+                            <CheckCircle size={14} color="#22c55e" />
+                          ) : rec.state === "error" ? (
+                            <XCircle size={14} color="#ef4444" />
+                          ) : (
+                            <Activity size={14} color="var(--muted-fg)" />
+                          )}
+                        </div>
+                      </td>
+                      <td>{rec.targetNew}</td>
+                      <td>{rec.progress}</td>
+                      <td>{rec.newVideos}</td>
+                      <td>{rec.skipped}</td>
+                      <td>{rec.failed}</td>
+                      <td>{fmtDate(rec.startedAt)}</td>
+                      <td>{fmtDate(rec.finishedAt)}</td>
+                    </tr>
+                    {expandedIdx === idx && (
+                      <tr>
+                        <td colSpan={8} style={{ padding: 0, border: "none" }}>
+                          <div
+                            className="admin-card"
+                            style={{
+                              margin: "8px 12px 12px",
+                              padding: 12,
+                              fontSize: 12,
+                            }}
+                          >
+                            {detailLoading === idx ? (
+                              <div style={{ color: "var(--muted-fg)" }}>加载中...</div>
+                            ) : detailMap[idx] ? (
+                              <div>
+                                <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                                  分类统计（共 {detailMap[idx].total} 条）
+                                </div>
+                                <div
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+                                    gap: "6px 12px",
+                                  }}
+                                >
+                                  {Object.entries(detailMap[idx].categoryCounts).map(([cat, count]) => {
+                                    const label = CATEGORIES.find((c) => c.key === cat)?.label || cat;
+                                    return (
+                                      <div key={cat} style={{ display: "flex", justifyContent: "space-between" }}>
+                                        <span style={{ color: "var(--muted-fg)" }}>{label}</span>
+                                        <span style={{ fontWeight: 600 }}>{count}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{ color: "var(--muted-fg)" }}>暂无详情</div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 ))}
               </tbody>
             </table>
@@ -311,7 +400,7 @@ export function Spider91Page() {
             勾选要爬取的分类，并用上下按钮调整轮询顺序。运行时会按优先级逐类补抓，达到目标新增数后停止。
           </p>
           <div style={{ display: "grid", gap: 8 }}>
-            {CATEGORIES.map((c) => {
+            {sortedCategories.map((c) => {
               const selected = categories.includes(c.key);
               const order = categories.indexOf(c.key);
               return (
@@ -341,24 +430,34 @@ export function Spider91Page() {
                     )}
                   </label>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button
-                      type="button"
-                      className="admin-btn"
-                      style={{ padding: "6px 8px" }}
-                      disabled={!selected || order <= 0}
-                      onClick={() => moveCategory(c.key, -1)}
-                    >
-                      <ChevronUp size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="admin-btn"
-                      style={{ padding: "6px 8px" }}
-                      disabled={!selected || order < 0 || order >= categories.length - 1}
-                      onClick={() => moveCategory(c.key, 1)}
-                    >
-                      <ChevronDown size={14} />
-                    </button>
+                    {selected && (
+                      <>
+                        <button
+                          type="button"
+                          className="admin-btn"
+                          style={{ padding: "6px 8px" }}
+                          disabled={order <= 0}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveCategory(c.key, -1);
+                          }}
+                        >
+                          <ChevronUp size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="admin-btn"
+                          style={{ padding: "6px 8px" }}
+                          disabled={order >= categories.length - 1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveCategory(c.key, 1);
+                          }}
+                        >
+                          <ChevronDown size={14} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               );

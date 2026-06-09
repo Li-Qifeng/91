@@ -506,3 +506,13 @@ export function getSpider91Status(driveId?: string) {
   const qs = driveId ? `?driveId=${encodeURIComponent(driveId)}` : "";
   return request<Spider91StatusResponse>(`/jobs/spider91/status${qs}`);
 }
+
+export type Spider91HistoryDetail = {
+  categoryCounts: Record<string, number>;
+  total: number;
+};
+
+export function getSpider91HistoryDetail(outputJson: string) {
+  const qs = `?outputJson=${encodeURIComponent(outputJson)}`;
+  return request<Spider91HistoryDetail>(`/jobs/spider91/history/detail${qs}`);
+}

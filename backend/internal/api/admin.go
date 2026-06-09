@@ -170,6 +170,7 @@ func (a *AdminServer) Register(r chi.Router) {
 			r.Get("/jobs/nightly/status", a.handleNightlyJobStatus)
 			r.Post("/jobs/nightly/run", a.handleRunNightlyJob)
 			r.Get("/jobs/spider91/status", a.handleSpider91Status)
+			r.Get("/jobs/spider91/history/detail", a.handleSpider91HistoryDetail)
 			r.Post("/tasks/stop", a.handleStopAllTasks)
 		})
 	})
@@ -1220,6 +1221,50 @@ func (a *AdminServer) handleSpider91Status(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, spider91StatusDTO{
 		Status:  *status,
 		History: history,
+	})
+}
+
+func (a *AdminServer) handleSpider91HistoryDetail(w http.ResponseWriter, r *http.Request) {
+	outputPath := r.URL.Query().Get("outputJson")
+	if outputPath == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("outputJson required"))
+		return
+	}
+
+	f, err := os.Open(outputPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"categoryCounts": map[string]int{},
+				"total":          0,
+			})
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer f.Close()
+
+	var payload struct {
+		Videos []struct {
+			Category string `json:"category"`
+		} `json:"videos"`
+	}
+	if err := json.NewDecoder(f).Decode(&payload); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	counts := make(map[string]int)
+	for _, v := range payload.Videos {
+		if v.Category == "" {
+			v.Category = "unknown"
+		}
+		counts[v.Category]++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"categoryCounts": counts,
+		"total":          len(payload.Videos),
 	})
 }
 
